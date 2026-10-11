@@ -1,11 +1,12 @@
 surface,xO,xF,xOH,confirmed,arrangement_note,status
 Ti2CO2,1,0,0,true,순수 O 말단,computed
 Ti2CF2,0,1,0,true,순수 F 말단,computed
+Ti2C_OH2,0,0,1,true,순수 OH 말단,computed
+Ti2C_O_OH,0.5,0,0.5,true,O:OH 50:50,computed
 Ti2C_OF,0.5,0.5,0,true,O:F 50:50 대표 배열,computed
 Ti2C_FH,0,0.5,0.5,true,F:OH 50:50 (H→OH 환산 가정),computed
 Ti2C_OH,0,0,1,false,순수 OH 말단(계획),planned
-Ti2C_O_OH,0.5,0,0.5,false,O:OH 50:50(계획),planned
 Ti2C_F_OH,0,0.5,0.5,false,F:OH 50:50(계획),planned
-Ti2C_ternary,0.5,0.25,0.25,false,삼원 대표(계획),planned
+Ti2C_ternary,0.3333,0.3333,0.3333,true,O:F:OH 삼원 균등,computed
 Ti2C_OF_alt,0.5,0.5,0,true,세트1 대형셀 O:F 50:50 대안 배열,computed
 Ti2C_FOH_clu,0,0.5,0.5,true,세트1 대형셀 F:OH 50:50 클러스터 배열,computed

@@ -53,11 +53,14 @@ def render(n_ead: int, n_models_active: int, n_models_total: int,
 
     values = (
         f'<div class="val-item"><span class="val-ic">{ILL.value_icon_water()}</span>'
-        f'<span class="val-t">수분·SO₂ 경쟁 조건 고려</span></div>'
+        f'<span class="val-t">수분·SO₂ 경쟁 조건 고려</span>'
+        f'<span class="val-d">배가스 속 H₂O·SO₂ 분압까지 반영해 CO₂ 선택도를 평가합니다.</span></div>'
         f'<div class="val-item"><span class="val-ic">{ILL.value_icon_source()}</span>'
-        f'<span class="val-t">출처가 보이는 계산</span></div>'
+        f'<span class="val-t">출처가 보이는 계산</span>'
+        f'<span class="val-d">모든 흡착 에너지는 DFT 원본값의 뺄셈으로만 계산하고 출처를 표시합니다.</span></div>'
         f'<div class="val-item"><span class="val-ic">{ILL.value_icon_explore()}</span>'
-        f'<span class="val-t">적은 계산으로 조성 탐색</span></div>'
+        f'<span class="val-t">적은 계산으로 조성 탐색</span>'
+        f'<span class="val-d">GPR과 Active Learning으로 다음에 계산할 조성을 추천합니다.</span></div>'
     )
 
     # body 에 landing-active 클래스 부여 (버튼 CSS 스코프)
@@ -82,8 +85,10 @@ def render(n_ead: int, n_models_active: int, n_models_total: int,
     </div>
     <div class="landing-hero">
       <div class="landing-hero-left">
+        <span class="landing-eyebrow">Ti₂C MXene · CO₂ 선택 포집</span>
         <div class="landing-title">{B.PROJECT_TITLE}</div>
-        <div class="landing-sub">DFT 계산과 Active Learning으로 CO₂ 선택 포집 표면 조성을 탐색합니다.</div>
+        <div class="landing-sub">DFT 계산과 Active Learning으로 배가스 조건에서
+          CO₂를 선택적으로 포집하는 표면 조성을 탐색합니다.</div>
       </div>
       <div class="landing-hero-right">
         <div>{ILL.landing_hero(animate=True)}
@@ -117,16 +122,21 @@ def render(n_ead: int, n_models_active: int, n_models_total: int,
     # ── 반응성 경향 요약 (전달받은 계산값에서만 산출) ──
     trend_html = _trend_block(trend_rows or [])
 
-    # ── 가치 카드 + 경향 + 상태 스트립 + 푸터 ──
+    # ── 가치 카드 + 지표 + 경향 + 푸터 ──
     st.markdown(
         html_block(f'''
 <div class="landing-wrap landing-wrap-cont">
   <div class="landing-inner landing-inner-cont">
+    <div class="landing-section-label">무엇을 할 수 있나요</div>
     <div class="landing-values">{values}</div>
+    <div class="landing-section-label">현재 데이터 현황</div>
+    <div class="landing-stat-row">
+      <div class="landing-stat"><div class="ls-val">{n_ead}</div>
+        <div class="ls-label">등록된 흡착 에너지(건)</div></div>
+      <div class="landing-stat"><div class="ls-val">{n_models_active}/{n_models_total}</div>
+        <div class="ls-label">활성 GPR 타깃 모델</div></div>
+    </div>
     {trend_html}
-    <div class="landing-strip">등록된 흡착 에너지
-      <span class="mono">{n_ead}</span>건 · GPR 활성 모델
-      <span class="mono">{n_models_active}/{n_models_total}</span></div>
     <div class="landing-foot">{B.SCHOOL} · {B.DEPT} · {B.wordmark(on_dark=True, size=13)}</div>
   </div>
 </div>

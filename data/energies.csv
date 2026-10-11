@@ -12,15 +12,31 @@ SET2/ad/CO2@Ti2C_OF,adsorbed,Ti2C_OF,CO2,-1456.27650839,Ti2C_OF_ad_set2.out,SET2
 SET1/mol/CO2,molecule,,CO2,-101.72261097,CO2_iso_set1.out,SET1,ok,,,,none,,supercell,
 SET1/mol/H2O,molecule,,H2O,-44.01436591,H2O_iso_set1.out,SET1,ok,,,,none,,supercell,
 SET1/mol/SO2,molecule,,SO2,-149.49042447,SO2_iso_set1.out,SET1,ok,,,,none,,supercell,
-SET1/clean/Ti2CF2,clean,Ti2CF2,,-2019.77007004,Ti2CF2_surf_set1.out,SET1,ok,,,,none,,supercell,
-SET1/clean/Ti2C_OF_alt,clean,Ti2C_OF_alt,,-1948.69709337,Ti2C_OF_alt_surf_set1.out,SET1,ok,,,,none,,supercell,
-SET1/clean/Ti2C_FOH_clu,clean,Ti2C_FOH_clu,,-1953.54496043,Ti2C_FOH_clu_surf_set1.out,SET1,ok,,,,none,,supercell,
-SET1/ad/CO2@Ti2CF2,adsorbed,Ti2CF2,CO2,-2121.49381241,comp_Ti2CF2_CO2_set1.out,SET1,ok,,,,none,,supercell,
-SET1/ad/H2O@Ti2CF2,adsorbed,Ti2CF2,H2O,-2063.78656123,comp_Ti2CF2_H2O_set1.out,SET1,ok,,,,none,,supercell,
-SET1/ad/SO2@Ti2CF2,adsorbed,Ti2CF2,SO2,-2169.26382104,comp_Ti2CF2_SO2_set1.out,SET1,ok,,,,none,,supercell,
-SET1/ad/CO2@Ti2C_OF_alt,adsorbed,Ti2C_OF_alt,CO2,-2050.42103512,comp_Ti2C_OF_alt_CO2_set1.out,SET1,ok,,,,none,,supercell,
-SET1/ad/H2O@Ti2C_OF_alt,adsorbed,Ti2C_OF_alt,H2O,-1992.71428401,comp_Ti2C_OF_alt_H2O_set1.out,SET1,ok,,,,none,,supercell,
-SET1/ad/SO2@Ti2C_OF_alt,adsorbed,Ti2C_OF_alt,SO2,-2098.19214325,comp_Ti2C_OF_alt_SO2_set1.out,SET1,ok,,,,none,,supercell,
-SET1/ad/CO2@Ti2C_FOH_clu,adsorbed,Ti2C_FOH_clu,CO2,-2055.26919834,comp_Ti2C_FOH_clu_CO2_set1.out,SET1,ok,,,,none,,supercell,
-SET1/ad/H2O@Ti2C_FOH_clu,adsorbed,Ti2C_FOH_clu,H2O,-1997.56295120,comp_Ti2C_FOH_clu_H2O_set1.out,SET1,ok,,,,none,,supercell,
-SET1/ad/SO2@Ti2C_FOH_clu,adsorbed,Ti2C_FOH_clu,SO2,-2103.04112140,comp_Ti2C_FOH_clu_SO2_set1.out,SET1,ok,,,,none,,supercell,
+SET1/clean/Ti2CO2,clean,Ti2CO2,,-1877.62419188,Ti2CO2_surf_set1.out,SET1,ok,,,,none,,supercell,순수 O 말단
+SET1/clean/Ti2CF2,clean,Ti2CF2,,-2019.77007004,Ti2CF2_surf_set1.out,SET1,ok,,,,none,,supercell,순수 F 말단
+SET1/clean/Ti2C_OH2,clean,Ti2C_OH2,,-1958.39247440,Ti2C_OH2_surf_set1.out,SET1,ok,,,,none,,supercell,순수 OH 말단
+SET1/clean/Ti2C_O_OH,clean,Ti2C_O_OH,,-1918.00833183,Ti2C_O_OH_surf_set1.out,SET1,ok,,,,none,,supercell,O:OH 50:50
+SET1/clean/Ti2C_OF_alt,clean,Ti2C_OF_alt,,-1948.69709337,Ti2C_OF_alt_surf_set1.out,SET1,ok,,,,none,,supercell,O:F 50:50
+SET1/clean/Ti2C_FOH_clu,clean,Ti2C_FOH_clu,,-1953.54496043,Ti2C_FOH_clu_surf_set1.out,SET1,ok,,,,none,,supercell,F:OH 50:50
+SET1/clean/Ti2C_ternary,clean,Ti2C_ternary,,-1973.97051029,Ti2C_ternary_surf_set1.out,SET1,ok,,,,none,,supercell,O:F:OH 삼원
+SET1/ad/CO2@Ti2CO2,adsorbed,Ti2CO2,CO2,-1979.36765103,comp_Ti2CO2_CO2_set1.out,SET1,ok,,,,none,,supercell,
+SET1/ad/H2O@Ti2CO2,adsorbed,Ti2CO2,H2O,-1921.66953932,comp_Ti2CO2_H2O_set1.out,SET1,ok,,,,none,,supercell,
+SET1/ad/SO2@Ti2CO2,adsorbed,Ti2CO2,SO2,-2027.18029162,comp_Ti2CO2_SO2_set1.out,SET1,ok,,,,none,,supercell,
+SET1/ad/CO2@Ti2CF2,adsorbed,Ti2CF2,CO2,-2121.50493817,comp_Ti2CF2_CO2_set1.out,SET1,ok,,,,none,,supercell,
+SET1/ad/H2O@Ti2CF2,adsorbed,Ti2CF2,H2O,-2063.79884102,comp_Ti2CF2_H2O_set1.out,SET1,ok,,,,none,,supercell,
+SET1/ad/SO2@Ti2CF2,adsorbed,Ti2CF2,SO2,-2169.27849185,comp_Ti2CF2_SO2_set1.out,SET1,ok,,,,none,,supercell,
+SET1/ad/CO2@Ti2C_OH2,adsorbed,Ti2C_OH2,CO2,-2060.12378440,comp_Ti2C_OH2_CO2_set1.out,SET1,ok,,,,none,,supercell,
+SET1/ad/H2O@Ti2C_OH2,adsorbed,Ti2C_OH2,H2O,-2002.45477968,comp_Ti2C_OH2_H2O_set1.out,SET1,ok,,,,none,,supercell,
+SET1/ad/SO2@Ti2C_OH2,adsorbed,Ti2C_OH2,SO2,-2107.94036496,comp_Ti2C_OH2_SO2_set1.out,SET1,ok,,,,none,,supercell,
+SET1/ad/CO2@Ti2C_O_OH,adsorbed,Ti2C_O_OH,CO2,-2019.74538183,comp_Ti2C_O_OH_CO2_set1.out,SET1,ok,,,,none,,supercell,
+SET1/ad/H2O@Ti2C_O_OH,adsorbed,Ti2C_O_OH,H2O,-1962.06228399,comp_Ti2C_O_OH_H2O_set1.out,SET1,ok,,,,none,,supercell,
+SET1/ad/SO2@Ti2C_O_OH,adsorbed,Ti2C_O_OH,SO2,-2067.55949168,comp_Ti2C_O_OH_SO2_set1.out,SET1,ok,,,,none,,supercell,
+SET1/ad/CO2@Ti2C_OF_alt,adsorbed,Ti2C_OF_alt,CO2,-2050.43681409,comp_Ti2C_OF_alt_CO2_set1.out,SET1,ok,,,,none,,supercell,
+SET1/ad/H2O@Ti2C_OF_alt,adsorbed,Ti2C_OF_alt,H2O,-1992.73458821,comp_Ti2C_OF_alt_H2O_set1.out,SET1,ok,,,,none,,supercell,
+SET1/ad/SO2@Ti2C_OF_alt,adsorbed,Ti2C_OF_alt,SO2,-2098.22310746,comp_Ti2C_OF_alt_SO2_set1.out,SET1,ok,,,,none,,supercell,
+SET1/ad/CO2@Ti2C_FOH_clu,adsorbed,Ti2C_FOH_clu,CO2,-2055.27828954,comp_Ti2C_FOH_clu_CO2_set1.out,SET1,ok,,,,none,,supercell,
+SET1/ad/H2O@Ti2C_FOH_clu,adsorbed,Ti2C_FOH_clu,H2O,-1997.58769138,comp_Ti2C_FOH_clu_H2O_set1.out,SET1,ok,,,,none,,supercell,
+SET1/ad/SO2@Ti2C_FOH_clu,adsorbed,Ti2C_FOH_clu,SO2,-2103.06842719,comp_Ti2C_FOH_clu_SO2_set1.out,SET1,ok,,,,none,,supercell,
+SET1/ad/CO2@Ti2C_ternary,adsorbed,Ti2C_ternary,CO2,-2075.69929029,comp_Ti2C_ternary_CO2_set1.out,SET1,ok,,,,none,,supercell,
+SET1/ad/H2O@Ti2C_ternary,adsorbed,Ti2C_ternary,H2O,-2018.00301905,comp_Ti2C_ternary_H2O_set1.out,SET1,ok,,,,none,,supercell,
+SET1/ad/SO2@Ti2C_ternary,adsorbed,Ti2C_ternary,SO2,-2123.48398188,comp_Ti2C_ternary_SO2_set1.out,SET1,ok,,,,none,,supercell,

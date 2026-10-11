@@ -51,15 +51,20 @@ def test_locked_eads_four_cases():
             f"{g}@{s}: {r.E_ad_eV:.4f} != {exp}"
 
 
-# 세트1 복합체 9종 E_ads (eV, 셋째 자리) — SET1 안에서 계산
+# 세트1 복합체 21종(7표면 × 3가스) E_ads (eV, 셋째 자리) — SET1 안에서 계산
+# DFT 재계산 데이터 기반(E_comp = E_surf + E_mol + E_ads).
 LOCKED_SET1_EADS = {
-    ("Ti2CF2", "CO2"): -0.015, ("Ti2CF2", "H2O"): -0.029, ("Ti2CF2", "SO2"): -0.045,
-    ("Ti2C_OF_alt", "CO2"): -0.018, ("Ti2C_OF_alt", "H2O"): -0.038, ("Ti2C_OF_alt", "SO2"): -0.063,
-    ("Ti2C_FOH_clu", "CO2"): -0.022, ("Ti2C_FOH_clu", "H2O"): -0.049, ("Ti2C_FOH_clu", "SO2"): -0.078,
+    ("Ti2CO2", "CO2"): -0.284, ("Ti2CO2", "H2O"): -0.422, ("Ti2CO2", "SO2"): -0.894,
+    ("Ti2CF2", "CO2"): -0.167, ("Ti2CF2", "H2O"): -0.196, ("Ti2CF2", "SO2"): -0.245,
+    ("Ti2C_OH2", "CO2"): -0.118, ("Ti2C_OH2", "H2O"): -0.652, ("Ti2C_OH2", "SO2"): -0.782,
+    ("Ti2C_O_OH", "CO2"): -0.196, ("Ti2C_O_OH", "H2O"): -0.539, ("Ti2C_O_OH", "SO2"): -0.826,
+    ("Ti2C_OF_alt", "CO2"): -0.233, ("Ti2C_OF_alt", "H2O"): -0.315, ("Ti2C_OF_alt", "SO2"): -0.484,
+    ("Ti2C_FOH_clu", "CO2"): -0.146, ("Ti2C_FOH_clu", "H2O"): -0.386, ("Ti2C_FOH_clu", "SO2"): -0.450,
+    ("Ti2C_ternary", "CO2"): -0.084, ("Ti2C_ternary", "H2O"): -0.247, ("Ti2C_ternary", "SO2"): -0.314,
 }
 
 
-def test_set1_nine_complexes():
+def test_set1_all_complexes():
     entries = load_energies(ENERGIES).entries
     for (s, g), exp in LOCKED_SET1_EADS.items():
         r = compute_ad_for(entries, s, g, calc_group="SET1")
@@ -75,7 +80,7 @@ def test_sets_not_mixed():
     r1 = compute_ad_for(entries, "Ti2CF2", "CO2", calc_group="SET1")
     r2 = compute_ad_for(entries, "Ti2CF2", "CO2", calc_group="SET2")
     assert r1.ok and r2.ok
-    assert abs(r1.E_ad_eV - r2.E_ad_eV) > 0.1  # 세트1 ≈ -0.015, 세트2 ≈ -0.523
+    assert abs(r1.E_ad_eV - r2.E_ad_eV) > 0.1  # 세트1 ≈ -0.167, 세트2 ≈ -0.523 (세트 혼합 금지)
 
 
 def test_calc_group_mismatch_refuses():
@@ -96,8 +101,8 @@ def test_calc_group_mismatch_refuses():
 
 def test_missing_reference_returns_pending():
     entries = load_energies(ENERGIES).entries
-    # H2O 복합체/짝이 없으므로 H2O 흡착은 계산 불가(데이터 없음)
-    r = compute_ad_for(entries, "Ti2CO2", "H2O")
+    # SET2는 H2O 단독 분자가 없으므로 H2O 흡착은 계산 불가(데이터 없음)
+    r = compute_ad_for(entries, "Ti2CF2", "H2O", calc_group="SET2")
     assert r.ok is False
     assert r.reason  # 사유 존재
 

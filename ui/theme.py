@@ -285,7 +285,8 @@ footer {{ visibility: hidden; }}
 
 /* ══════════════════════ 시작 화면 (landing) ══════════════════ */
 /* landing 은 일반 블록(오버레이 아님) — Streamlit 버튼이 가려지지 않도록 한다.
-   어두운 배경은 app 컨테이너 전체에 깔고, 상단/하단 조각이 끊김 없이 이어지게 한다. */
+   가독성은 JS(body.landing-active)에 의존하지 않는다: 랜딩 조각마다 자체 배경을
+   깔고, 모든 하위 텍스트에 밝은 색을 강제한다(어떤 환경에서도 글씨가 보이도록). */
 body.landing-active .stApp,
 body.landing-active [data-testid="stAppViewContainer"] {{
     background: linear-gradient(135deg, {T.NAVY} 0%, #0C3A3A 55%, {T.PRIMARY} 130%) !important;
@@ -296,88 +297,120 @@ body.landing-active [data-testid="stSidebar"],
 body.landing-active [data-testid="stHeader"] {{ display:none !important; }}
 body.landing-active .block-container {{ padding-top:1.2rem !important; max-width:1100px; }}
 
+/* 랜딩 블록: 자체 어두운 배경 + 하위 모든 텍스트 밝은색 강제 (JS 비의존) */
 .landing-wrap {{
-    position:relative; color:#F1F5F9;
+    position:relative; color:#F8FAFC;
     background: linear-gradient(135deg, {T.NAVY} 0%, #0C3A3A 55%, {T.PRIMARY} 130%);
     animation: landingFade 300ms ease;
 }}
-/* 아래 조각(콘텐츠)은 배경을 투명하게 — 상단 조각과 app 배경이 이어짐 */
-.landing-wrap-cont {{ background:transparent; }}
+.landing-wrap, .landing-wrap * {{ color:#F8FAFC; }}
+/* 아래 조각(콘텐츠)도 같은 어두운 배경을 자체적으로 유지 → 글씨 가독성 보장 */
+.landing-wrap-cont {{
+    background: linear-gradient(135deg, #0C3A3A 0%, {T.PRIMARY} 130%);
+}}
 @keyframes landingFade {{ from {{ opacity:0; }} to {{ opacity:1; }} }}
-.landing-pattern {{ position:absolute; inset:0; width:100%; height:100%; z-index:0; opacity:0.5; }}
+.landing-pattern {{ position:absolute; inset:0; width:100%; height:100%; z-index:0; opacity:0.45; }}
 .lp-drift {{ animation: lpDrift 9s ease-in-out infinite alternate; }}
 @keyframes lpDrift {{ from {{ transform:translateX(-30px); }} to {{ transform:translateX(30px); }} }}
-.landing-inner {{ position:relative; z-index:1; max-width:1100px; margin:0 auto; padding:20px 8px 8px; }}
-.landing-inner-cont {{ padding:8px 8px 24px; }}
+.landing-inner {{ position:relative; z-index:1; max-width:1100px; margin:0 auto; padding:24px 24px 12px; }}
+.landing-inner-cont {{ padding:12px 24px 28px; }}
 .landing-top {{ display:flex; justify-content:space-between; align-items:center; gap:12px; }}
 .landing-top .lt-left {{ display:flex; align-items:center; gap:10px; }}
 .landing-top .lt-left .ill-tri {{ width:28px; height:28px; }}
 .landing-top-right {{ display:flex; align-items:center; gap:14px; }}
-.landing-event {{ font-size:12px; color:#CBD5E1; text-align:right; }}
+.landing-event {{ font-size:12px; color:#E2E8F0 !important; text-align:right; font-weight:500; }}
 .landing-enter-link {{ font-size:12px; color:#5EEAD4 !important; text-decoration:none;
-    border:1px solid rgba(94,234,212,0.5); border-radius:7px; padding:3px 9px; white-space:nowrap; }}
-.landing-enter-link:hover {{ background:rgba(94,234,212,0.12); }}
-.landing-hero {{ display:flex; gap:28px; align-items:center; margin-top:20px; }}
+    border:1px solid rgba(94,234,212,0.6); border-radius:7px; padding:4px 11px; white-space:nowrap;
+    font-weight:600; }}
+.landing-enter-link:hover {{ background:rgba(94,234,212,0.15); }}
+.landing-hero {{ display:flex; gap:28px; align-items:center; margin-top:28px; }}
 .landing-hero-left {{ flex:1.1; min-width:0; }}
 .landing-hero-right {{ flex:1.3; display:flex; justify-content:center; }}
-.landing-title {{ font-size:46px; font-weight:800; line-height:1.16; letter-spacing:-0.02em; color:#fff;
-    text-shadow:0 2px 8px rgba(0,0,0,0.35); }}
-.landing-sub {{ font-size:17px; color:#E8EEF5; margin-top:14px; line-height:1.7; max-width:48ch;
-    font-weight:500; text-shadow:0 1px 3px rgba(0,0,0,0.3); }}
-/* 히어로 일러스트 1.4배 (max-width 460 → 644) */
-.landing-hero-svg {{ width:100%; max-width:644px; height:auto; }}
+.landing-eyebrow {{ display:inline-block; font-size:12px; font-weight:700; letter-spacing:.1em;
+    text-transform:uppercase; color:#5EEAD4 !important; margin-bottom:14px;
+    padding:5px 12px; border-radius:999px; background:rgba(94,234,212,0.12);
+    border:1px solid rgba(94,234,212,0.3); }}
+.landing-title {{ font-size:48px; font-weight:800; line-height:1.14; letter-spacing:-0.02em;
+    color:#FFFFFF !important; text-shadow:0 2px 12px rgba(0,0,0,0.45); }}
+.landing-sub {{ font-size:18px; color:#E8EEF5 !important; margin-top:18px; line-height:1.75;
+    max-width:50ch; font-weight:400; }}
+/* 히어로 일러스트 */
+.landing-hero-svg {{ width:100%; max-width:620px; height:auto;
+    filter: drop-shadow(0 10px 30px rgba(0,0,0,0.3)); }}
 .landing-mol {{ font-size:13px; fill:#E2E8F0; text-anchor:middle; font-family:'JetBrains Mono',monospace; }}
 .landing-layer {{ font-size:14px; fill:#0B1F33; font-weight:800; }}
-.landing-legend text {{ font-size:13px; fill:#CBD5E1; }}
-.landing-caption {{ font-size:12px; color:#CBD5E1; text-align:center; margin-top:4px; font-style:italic; }}
-.landing-values {{ display:flex; gap:16px; margin-top:10px; flex-wrap:wrap; }}
-.val-item {{ flex:1; min-width:200px; display:flex; gap:10px; align-items:flex-start;
-    background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12);
-    border-radius:12px; padding:14px 16px; }}
-.val-item .val-ic {{ color:#5EEAD4; flex:0 0 auto; }}
+.landing-legend text {{ font-size:13px; fill:#E2E8F0; }}
+.landing-caption {{ font-size:12px; color:#CBD5E1 !important; text-align:center; margin-top:6px; font-style:italic; }}
+
+/* ── 특징 카드 (실제 플랫폼 랜딩 스타일: 또렷한 패널 + 아이콘 칩) ── */
+.landing-section-label {{ font-size:13px; font-weight:700; letter-spacing:.04em;
+    color:#99F6E4 !important; text-transform:uppercase; margin:28px 0 14px; }}
+.landing-values {{ display:flex; gap:16px; margin-top:4px; flex-wrap:wrap; }}
+.val-item {{ flex:1; min-width:220px; display:flex; flex-direction:column; gap:12px;
+    align-items:flex-start; background:rgba(255,255,255,0.08);
+    border:1px solid rgba(255,255,255,0.16); border-radius:14px; padding:20px 20px;
+    transition: transform 150ms ease, background 150ms ease, border-color 150ms ease; }}
+.val-item:hover {{ transform:translateY(-3px); background:rgba(255,255,255,0.12);
+    border-color:rgba(94,234,212,0.5); }}
+.val-item .val-ic {{ color:#0B1F33 !important; flex:0 0 auto; width:40px; height:40px;
+    border-radius:11px; background:#5EEAD4; display:flex; align-items:center; justify-content:center; }}
+.val-item .val-ic svg {{ stroke:#0B1F33; }}
 .val-svg {{ width:22px; height:22px; }}
-.val-item .val-t {{ font-size:14px; font-weight:600; color:#F1F5F9; }}
-.landing-strip {{ margin-top:16px; padding:12px 16px; border-radius:10px;
-    background:rgba(0,0,0,0.30); border:1px solid rgba(255,255,255,0.14);
-    font-size:13px; line-height:1.6; color:#F1F5F9; }}
-.landing-strip .mono {{ color:#5EEAD4; }}
-.landing-foot {{ margin-top:16px; font-size:12px; color:#CBD5E1; }}
+.val-item .val-t {{ font-size:15px; font-weight:700; color:#FFFFFF !important; line-height:1.3; }}
+.val-item .val-d {{ font-size:13px; font-weight:400; color:#CBD5E1 !important; line-height:1.6; }}
+
+/* ── 지표/경향 스트립 (또렷한 어두운 패널) ── */
+.landing-strip {{ margin-top:18px; padding:16px 18px; border-radius:12px;
+    background:rgba(2,14,20,0.55); border:1px solid rgba(255,255,255,0.14);
+    font-size:14px; line-height:1.7; color:#F1F5F9 !important; }}
+.landing-strip b {{ color:#FFFFFF !important; }}
+.landing-strip .mono {{ color:#5EEAD4 !important; font-weight:600; }}
+.landing-stat-row {{ display:flex; gap:12px; flex-wrap:wrap; margin-top:18px; }}
+.landing-stat {{ flex:1; min-width:160px; background:rgba(255,255,255,0.07);
+    border:1px solid rgba(255,255,255,0.14); border-radius:12px; padding:14px 16px; }}
+.landing-stat .ls-val {{ font-size:26px; font-weight:800; color:#5EEAD4 !important;
+    font-family:'JetBrains Mono',monospace; line-height:1.1; }}
+.landing-stat .ls-label {{ font-size:12px; color:#CBD5E1 !important; margin-top:4px; }}
+.landing-foot {{ margin-top:22px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.12);
+    font-size:12px; color:#CBD5E1 !important; }}
 .landing-foot .wordmark {{ font-size:13px; }}
-.landing-scope {{ margin-top:12px; padding:14px 16px; border-radius:10px;
-    background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.18);
-    font-size:13px; line-height:1.6; color:#E2E8F0; }}
+.landing-scope {{ margin-top:14px; padding:16px 18px; border-radius:12px;
+    background:rgba(255,255,255,0.10); border:1px solid rgba(255,255,255,0.2);
+    font-size:14px; line-height:1.7; color:#F1F5F9 !important; }}
 
 /* ── 시작 화면 CTA 버튼 (body.landing-active 스코프 → 다른 페이지 영향 없음) ── */
-.landing-cta-anchor {{ margin-top:20px; }}  /* 부제와 버튼 사이 24px 이상 확보 */
+.landing-cta-anchor {{ margin-top:24px; }}  /* 부제와 버튼 사이 간격 확보 */
 body.landing-active .stButton {{ margin-top:4px; }}
 body.landing-active .stButton > button,
 body.landing-active [data-testid="stBaseButton-primary"],
 body.landing-active [data-testid="stBaseButton-secondary"] {{
-    min-height:48px; border-radius:12px; font-size:15px; font-weight:700;
+    min-height:50px; border-radius:12px; font-size:15px; font-weight:700;
     transition: transform 150ms ease, box-shadow 150ms ease;
 }}
 /* 주 버튼: 앰버 배경 + 네이비 글자 (대비 AA) */
 body.landing-active [data-testid="stBaseButton-primary"] {{
     background:{T.GAS['SO2']['color']} !important; color:{T.NAVY} !important;
     border:1px solid {T.GAS['SO2']['color']} !important;
+    box-shadow:0 4px 14px rgba(217,119,6,0.3);
 }}
 body.landing-active [data-testid="stBaseButton-primary"]:hover {{
-    transform:translateY(-2px); box-shadow:0 8px 20px rgba(217,119,6,0.35);
+    transform:translateY(-2px); box-shadow:0 8px 22px rgba(217,119,6,0.42);
     background:#B45309 !important; color:#fff !important;
 }}
-/* 보조 버튼: 투명 배경 + 흰 테두리 + 흰 글자 */
+/* 보조 버튼: 반투명 배경 + 흰 테두리 + 흰 글자 */
 body.landing-active [data-testid="stBaseButton-secondary"] {{
-    background:transparent !important; color:#fff !important;
+    background:rgba(255,255,255,0.06) !important; color:#fff !important;
     border:1px solid rgba(255,255,255,0.85) !important;
 }}
 body.landing-active [data-testid="stBaseButton-secondary"]:hover {{
-    transform:translateY(-2px); background:rgba(255,255,255,0.10) !important;
+    transform:translateY(-2px); background:rgba(255,255,255,0.14) !important;
 }}
 
 @media (max-width: 760px) {{
-    .landing-title {{ font-size:32px; }}
+    .landing-title {{ font-size:34px; }}
     .landing-hero {{ flex-direction:column; align-items:flex-start; }}
     .landing-hero-right {{ order:2; width:100%; }}
+    .landing-inner, .landing-inner-cont {{ padding-left:14px; padding-right:14px; }}
 }}
 
 /* ── 브레드크럼 ───────────────────────────────────────────── */

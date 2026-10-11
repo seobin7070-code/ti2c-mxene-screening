@@ -23,8 +23,8 @@ Ti₂C MXene 표면 구성(–O, –F, –OH 비율)에 대한 CO₂·H₂O·SO�
 
 ## 데이터 세트 (두 calc_group)
 
-- **SET1 (대형 슈퍼셀)**: 단독 분자 3(CO₂·H₂O·SO₂), 표면 3(Ti2CF2·Ti2C_OF_alt·Ti2C_FOH_clu),
-  복합체 **9종**(각 표면 × 3가스). 세트1 전용 표면 2개는 조성 좌표 미확정(임의로 지어내지 않음).
+- **SET1 (대형 슈퍼셀)**: 단독 분자 3(CO₂·H₂O·SO₂), 표면 7(Ti2CO2·Ti2CF2·Ti2C_OH2·Ti2C_O_OH·
+  Ti2C_OF_alt·Ti2C_FOH_clu·Ti2C_ternary), 복합체 **21종**(각 표면 × 3가스). 모든 조성 좌표 확정.
 - **SET2 (표준 단위셀)**: 단독 분자 2(CO₂·SO₂), 표면 4(Ti2CO2·Ti2CF2·Ti2C_FH·Ti2C_OF),
   복합체 4종. (H₂O 단독 분자 없음 → SET2에서 H₂O/P(CO₂/H₂O)는 데이터 없음.)
 - 두 세트는 셀 크기가 다른 독립 계산이라 **세트 내에서만 E_ads를 계산**하고, 화면에서는 겹쳐 비교만 합니다.

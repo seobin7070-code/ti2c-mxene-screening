@@ -28,13 +28,13 @@ def test_two_calc_groups():
     assert set(S.calc_groups(entries)) == {"SET1", "SET2"}
 
 
-def test_all_adsorption_rows_13_complexes():
+def test_all_adsorption_rows_25_complexes():
     entries, _ = _load()
     rows = S.all_adsorption_rows(entries)
-    assert len(rows) == 13          # 세트1 9종 + 세트2 4종
+    assert len(rows) == 25          # 세트1 21종(7표면×3가스) + 세트2 4종
     assert all(r["ok"] for r in rows)
     # 세트별 개수
-    assert sum(1 for r in rows if r["calc_group"] == "SET1") == 9
+    assert sum(1 for r in rows if r["calc_group"] == "SET1") == 21
     assert sum(1 for r in rows if r["calc_group"] == "SET2") == 4
 
 
@@ -83,10 +83,10 @@ def test_unified_gpr_active_with_threshold():
         f"통합 학습 데이터 {len(pts)}개 (<{st.min_train_points})"
     m = fit_unified(pts, st.min_train_points)
     assert isinstance(m, UnifiedModel)
-    # 학습점 예측이 실제 계산값에 근접
+    # 학습점 예측이 실제 계산값에 근접(학습점 25개로 늘어 평활화가 커진 점 반영)
     mu, _ = m.predict((0.0, 1.0, 0.0), "SET1", "CO2")
     r = S.compute_ad_for(entries, "Ti2CF2", "CO2", calc_group="SET1")
-    assert abs(mu - r.E_ad_eV) < 0.02
+    assert abs(mu - r.E_ad_eV) < 0.05
 
 
 def test_settings_defaults():
