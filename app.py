@@ -1,8 +1,7 @@
-"""배가스 맞춤형 Ti2C MXene AI-DFT 스크리닝 플랫폼 — Streamlit UI (한국어).
+"""배가스 맞춤형 Ti₂C MXene 표면 설계 플랫폼 — Streamlit UI (한국어).
 
-표현 레이어. core가 반환한 결과를 '표시'만 하며, 어떤 에너지 값도 하드코딩하지 않는다.
-계산 가능 여부·suspect·pending 등 과학적 판단은 전부 core가 내린다.
-디자인 시스템은 ui/ 패키지(토큰·CSS·컴포넌트·차트)에서 가져온다.
+PDF 명세([5] 화면 구성)에 따라 시작 화면 + 6개 메뉴로 구성한다.
+표현 레이어는 core 결과를 '표시'만 한다. 에너지 값은 CSV에서만 읽는다.
 """
 
 from __future__ import annotations
@@ -10,58 +9,48 @@ from __future__ import annotations
 import io
 import os
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
 from core.loader import load_energies, parse_rows, EnergyEntry
 from core.units import ry_to_ev, RY_TO_EV
-from core.metrics import selectivity_P, delta_d, load_geometry
 from core.composition import load_composition_map, is_trainable
-from core import registry
-from core import gpr
-from core.quality import loocv
-from core.export import df_to_csv_bytes, ensure_provenance_columns, fig_to_png_bytes
-from core import qe_parser
-from core import jobs as JOBS
-from core import roadmap as ROADMAP
-from core import integrity as INTEG
-from core import datafiles as DF
+from core.settings import load_settings
+from core.scope import APPLICABILITY
+from core import screening as S
+from core import gpr_model as G
+from core.classify import classify, ClassifyInput
+from core.coords import is_normalized, composition_sum
+from core.conditions import NOTE as COND_NOTE, NOTE_HINT as COND_HINT, ppm_to_molpct
 
 from ui import theme
 from ui import components as C
 from ui import charts
 from ui import tokens as T
-from ui import illustrations as ILL
-from ui import glossary
 from ui import branding as B
 from ui import landing
 from ui import nav as NAV
+from ui.htmlutil import html_block as _html_block
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(HERE, "data")
+CONFIG = os.path.join(HERE, "config", "settings.json")
 ENERGIES_CSV = os.path.join(DATA_DIR, "energies.csv")
-GEOMETRY_CSV = os.path.join(DATA_DIR, "geometry.csv")
 COMP_CSV = os.path.join(DATA_DIR, "composition_map.csv")
-JOBS_CSV = os.path.join(DATA_DIR, "jobs.csv")
+GEOM_CSV = os.path.join(DATA_DIR, "geometry.csv")
 BACKUP_DIR = os.path.join(DATA_DIR, "backup")
-AUDIT_CSV = os.path.join(DATA_DIR, "audit_log.csv")
 
 GASES = ["CO2", "H2O", "SO2"]
-P_METRICS = ["P(CO2/H2O)", "P(CO2/SO2)"]
 
 st.set_page_config(
-    page_title=B.PROJECT_TITLE,
-    page_icon="⬡",
+    page_title="Ti₂C MXene 스크리닝",
+    page_icon=B.favicon_path(),
     layout="wide",
     initial_sidebar_state="expanded",
 )
-# ── Markdown HTML 안전 패치 ──────────────────────────────────────────
-# st.markdown / DeltaGenerator.markdown 에 unsafe_allow_html=True 로 넘어오는
-# 모든 HTML 문자열에 html_block()을 적용해, 들여쓰기·빈 줄로 인한 Markdown
-# 코드블록화(=HTML이 글자로 노출)를 원천 차단한다. <style>/<pre>/<code> 는 보존.
-from ui.htmlutil import html_block as _html_block  # noqa: E402
 
-
+# ── Markdown HTML 안전 가드 (들여쓰기·빈 줄 코드블록화 방지) ──
 def _install_markdown_guard():
     from streamlit.delta_generator import DeltaGenerator
     if getattr(DeltaGenerator.markdown, "_html_guarded", False):
@@ -78,22 +67,11 @@ def _install_markdown_guard():
 
 
 _install_markdown_guard()
-
 theme.inject()
 
-# 발표 모드: 글자 1.15배·보조 설명 숨김·카드 간격 확대 (데이터는 불변)
-if st.session_state.get("present_mode"):
-    C.render_html(st, "<style>"
-        ".block-container { font-size:1.15em; }"
-        ".block-container .hint, .block-container .ill-caption,"
-        " .block-container [data-testid='stCaptionContainer'] { display:none !important; }"
-        ".card, .kpi-eq, .scn-card, .cat-card { margin-bottom:24px !important; padding:24px !important; }"
-        ".section-head { margin-top:28px !important; }"
-        "</style>")
 
-
-# ───────────────────────── 데이터 로딩 (파일 mtime 기반 캐시) ─────────────────
-def _mtime(path: str) -> float:
+# ───────────────────────── 데이터 로딩 (mtime 캐시) ─────────────────
+def _mtime(path):
     try:
         return os.path.getmtime(path)
     except OSError:
@@ -101,1338 +79,601 @@ def _mtime(path: str) -> float:
 
 
 @st.cache_data(show_spinner=False)
-def _load_energies_cached(path: str, mtime: float):
-    """energies.csv 로딩 캐시. mtime이 인자이므로 파일 변경 시 자동 무효화."""
+def _load_energies(path, mtime):
     res = load_energies(path)
     return res.entries, res.errors
 
 
 @st.cache_data(show_spinner=False)
-def _load_comp_cached(path: str, mtime: float):
+def _load_comp(path, mtime):
     return load_composition_map(path)
 
 
-@st.cache_data(show_spinner=False)
-def _load_geom_cached(path: str, mtime: float):
-    return load_geometry(path)
-
-
-def get_entries() -> tuple[list[EnergyEntry], list]:
+def get_entries():
     if "uploaded_entries" in st.session_state:
         return st.session_state["uploaded_entries"], st.session_state.get("uploaded_errors", [])
-    return _load_energies_cached(ENERGIES_CSV, _mtime(ENERGIES_CSV))
-
-
-def fmt(x, nd=5):
-    return "—" if x is None else f"{x:.{nd}f}"
+    return _load_energies(ENERGIES_CSV, _mtime(ENERGIES_CSV))
 
 
 entries, load_errors = get_entries()
-comp_map = _load_comp_cached(COMP_CSV, _mtime(COMP_CSV))
-geom_map = _load_geom_cached(GEOMETRY_CSV, _mtime(GEOMETRY_CSV))
+comp_map = _load_comp(COMP_CSV, _mtime(COMP_CSV))
+settings = load_settings(CONFIG)
 
 
-# ───────────────────────── 파생 통계 (표시용, core 호출) ─────────────────────────
-def computed_ead_rows() -> list[dict]:
-    """계산 가능한 모든 (표면,가스) E_ad를 모은다."""
-    rows = []
-    for s in registry.surfaces(entries):
-        for g in GASES:
-            r = registry.compute_ad_for(entries, s, g)
-            if r.ok:
-                rows.append({
-                    "surface": s, "gas": g,
-                    "e_ad_ev": r.E_ad_eV, "e_ad_ry": r.E_ad_Ry,
-                    "suspect": r.suspect, "calc_group": r.calc_group,
-                    "source": r.components["E_adsorbed"]["source_file"],
-                })
-    return rows
+def fmt(x, nd=3):
+    return "—" if x is None else f"{x:.{nd}f}"
 
 
-def metric_trainable_counts() -> dict[str, int]:
-    """지표별 '지표가 실제 계산된 표면' 수. 세 지표(P 2종 + Δd) 모두 포함.
-
-    - P(CO2/H2O), P(CO2/SO2): 해당 선택성 지표가 계산 가능한(ok) 조성 확정 표면 수.
-    - Δd: geometry(z_before/z_after)로 Δd가 계산된 조성 확정 표면 수.
-    지표가 pending인 표면은 세지 않는다. (요구사항 8.2, 8.6)
-    """
-    return {
-        m: registry.count_trainable_for_metric(entries, comp_map, m, geom_map)
-        for m in registry.ALL_METRICS
-    }
+# ───────────────────────── GPR 모델 (타깃 4개) ─────────────────
+@st.cache_resource(show_spinner=False)
+def _fit_models(mtime_e, mtime_c, min_train):
+    models = {}
+    for t in G.TARGETS:
+        pts = S.training_points(entries, comp_map, t)
+        models[t] = G.fit_target(pts, t, min_train)
+    return models
 
 
-METRIC_LABEL = {
-    "P(CO2/H2O)": "P(CO₂/H₂O)",
-    "P(CO2/SO2)": "P(CO₂/SO₂)",
-    "Δd": "Δd",
-}
+def get_models():
+    return _fit_models(_mtime(ENERGIES_CSV), _mtime(COMP_CSV), settings.min_train_points)
 
 
-def active_model_count() -> int:
-    """유효 표면 수가 MIN_TRAINING 이상인 지표 모델 수 (0~3)."""
-    counts = metric_trainable_counts()
-    return sum(1 for m in registry.ALL_METRICS if counts[m] >= gpr.MIN_TRAINING)
+def active_model_count():
+    models = get_models()
+    return sum(1 for m in models.values() if isinstance(m, G.GprModel))
 
 
 # ───────────────────────── 시작 화면 분기 ─────────────────────────
-# 안전장치: URL ?enter=1 이면 시작 화면을 건너뛰고 바로 입장
 if not st.session_state.get("entered") and landing.should_skip_via_query():
     st.session_state["entered"] = True
 
 if not st.session_state.get("entered"):
-    landing.render(
-        n_ead=len(computed_ead_rows()),
-        n_models_active=active_model_count(),
-        n_models_total=len(registry.ALL_METRICS),
-    )
+    n_ead = sum(1 for s in S.surfaces(entries) for g in GASES
+                if S.compute_ad_for(entries, s, g).ok)
+    landing.render(n_ead=n_ead, n_models_active=active_model_count(),
+                   n_models_total=len(G.TARGETS))
     st.stop()
 
 
-def confirmed_composition_points() -> list[tuple[float, float, float]]:
-    """조성 확정 표면들의 [xO,xF,xOH] 좌표 (삼각도 모티프에 점으로 표시)."""
-    pts = []
-    for c in comp_map.values():
-        if c.confirmed and c.xO is not None and c.xF is not None and c.xOH is not None:
-            pts.append((c.xO, c.xF, c.xOH))
-    return pts
+# ───────────────────────── 사이드바 ─────────────────────────
+from ui import illustrations as ILL
 
-
-# ───────────────────────── 사이드바 (카테고리 내비) ─────────────────────────
 with st.sidebar:
-    tri = ILL.composition_triangle(size=22, points=confirmed_composition_points())
-    C.render_html(st, f'<div class="sidebar-logo-row">{tri}'
-        f'<span class="sidebar-logo">{B.wordmark(on_dark=False, size=16)}</span></div>'
-        '<div class="sidebar-sub">Ti₂C MXene 표면 설계 플랫폼</div>')
-    # 로고(홈) 클릭 → 시작 화면 복귀
-    if st.button("← 시작 화면으로", use_container_width=True):
+    tri = ILL.composition_triangle(size=22)
+    if st.button("← 시작 화면으로", use_container_width=True, key="back_home"):
         st.session_state["entered"] = False
         st.rerun()
+    st.markdown(
+        f'<div class="sidebar-logo-row">{tri}'
+        f'<span class="sidebar-logo">{B.wordmark(on_dark=False, size=15)}</span></div>'
+        '<div class="sidebar-sub">Ti₂C MXene 표면 설계</div>',
+        unsafe_allow_html=True,
+    )
 
-    # 프로그램적 네비게이션 요청(_nav) 처리 → current_page 설정
     _nav_req = st.session_state.pop("_nav", None)
-    if _nav_req in NAV.all_pages():
+    if _nav_req in NAV.PAGES:
         st.session_state["current_page"] = _nav_req
-        # 해당 카테고리 라디오 위젯 상태도 맞춰 둠
-        st.session_state[f"navradio_{NAV.category_of(_nav_req)}"] = _nav_req
-
     if "current_page" not in st.session_state:
-        st.session_state["current_page"] = "Overview"
+        st.session_state["current_page"] = NAV.DEFAULT_PAGE
 
-    def _on_pick(cat: str):
-        st.session_state["current_page"] = st.session_state[f"navradio_{cat}"]
+    page = st.radio("메뉴", NAV.PAGES,
+                    index=NAV.PAGES.index(st.session_state["current_page"]),
+                    label_visibility="collapsed", key="nav_radio")
+    st.session_state["current_page"] = page
 
-    # 카테고리별 그룹 헤더 + 라디오
-    for cat, pages in NAV.CATEGORIES.items():
-        C.render_html(st, f'<div class="nav-group">{NAV.CAT_ICONS[cat]} &nbsp;{cat} '
-            f'<span style="font-weight:400;text-transform:none;letter-spacing:0">'
-            f'· {NAV.CAT_DESC[cat]}</span></div>')
-        wkey = f"navradio_{cat}"
-        cur = st.session_state["current_page"]
-        idx = pages.index(cur) if cur in pages else None
-        st.radio(
-            cat, pages,
-            index=idx,  # 현재 페이지가 이 카테고리에 없으면 선택 없음(None)
-            label_visibility="collapsed", key=wkey,
-            on_change=_on_pick, args=(cat,),
+    st.markdown('<hr style="border:none;border-top:1px solid var(--ill-faint);margin:10px 0">',
+                unsafe_allow_html=True)
+    # 타깃별 학습 데이터 진행바 4줄
+    st.markdown('<div class="kpi-label">GPR 학습 데이터</div>', unsafe_allow_html=True)
+    models = get_models()
+    label_map = {"Eads_CO2": "Eads(CO₂)", "Eads_H2O": "Eads(H₂O)",
+                 "Eads_SO2": "Eads(SO₂)", "Delta_d": "Δd"}
+    for t in G.TARGETS:
+        m = models[t]
+        n = m.n if isinstance(m, G.GprModel) else m.n
+        st.markdown(
+            f'<div style="margin-top:6px"><div class="hint">{label_map[t]}</div>'
+            f'{C.progress_bar(n, settings.min_train_points)}</div>',
+            unsafe_allow_html=True,
         )
 
-    page = st.session_state["current_page"]
 
-    C.render_html(st, '<hr style="border:none;border-top:1px solid var(--ill-faint);margin:12px 0 4px">')
-
-    # 데이터 상태 진행바 3줄 (0/7)
-    counts = metric_trainable_counts()
-    per_metric_html = "".join(
-        f'<div style="margin-top:8px"><div class="hint">{METRIC_LABEL[m]} 모델</div>'
-        f'{C.progress_bar(counts[m], gpr.MIN_TRAINING)}</div>'
-        for m in registry.ALL_METRICS
-    )
-    C.render_html(st, f'<div class="data-summary">'
-        f'<div class="kpi-label">데이터 상태</div>'
-        f'<div style="margin:6px 0"><span class="mono">{len(registry.surfaces(entries))}</span> 표면 · '
-        f'<span class="mono">{len(computed_ead_rows())}</span> E_ad 계산됨</div>'
-        f'<div class="kpi-label" style="margin-top:10px">모델 학습 데이터 '
-        f'<span class="hint">(계산된 표면 / {gpr.MIN_TRAINING})</span></div>'
-        f'{per_metric_html}</div>')
-
-    # 발표 모드 토글
-    st.session_state["present_mode"] = st.toggle(
-        "발표 모드", value=st.session_state.get("present_mode", False),
-        help="글자 확대·보조 설명 숨김. 데이터는 변경되지 않습니다.",
-    )
-
-    # 문서 영역
-    C.render_html(st, '<div class="sidebar-docs">'
-        '<div class="kpi-label">문서</div>'
-        '<a href="https://github.com/seobin7070-code/ti2c-mxene-screening" '
-        'target="_blank" rel="noopener">· README (GitHub)</a>'
-        '</div>')
+# ═══════════════════════ 공통 헬퍼 ═══════════════════════
+def _class_badge(label: str) -> str:
+    cls = {"우선 검토": "cls-priority", "추가 계산 권장": "cls-more",
+           "현재 기준 미충족": "cls-unmet"}.get(label, "cls-more")
+    return f'<span class="cls-badge {cls}">{label}</span>'
 
 
-# ═══════════════════════ Overview ═══════════════════════
-def _pipeline_steps(rows, counts):
-    """파이프라인 4단계 상태를 데이터에서 계산한다 (꾸밈 없음)."""
-    has_energy = len(entries) > 0
-    has_ead = len(rows) > 0
-    gpr_active = any(counts[m] >= gpr.MIN_TRAINING for m in registry.ALL_METRICS)
-
-    def st_pair(done, waiting_ok=True):
-        if done:
-            return "ok", "완료"
-        return ("pending", "대기") if waiting_ok else ("pending", "대기")
-
-    s1 = ("ok", "완료") if has_energy else ("pending", "대기")
-    s2 = ("ok", "완료") if has_ead else ("pending", "대기")
-    s3 = ("ok", "완료") if gpr_active else ("pending", "잠금")
-    s4 = ("ok", "완료") if gpr_active else ("pending", "잠금")
-    return [
-        {"title": "DFT 계산", "desc": "Quantum ESPRESSO · PBE-D3",
-         "status": s1[0], "status_label": s1[1], "icon_svg": ILL.icon_dft()},
-        {"title": "에너지·지표 산출", "desc": "E_ads · P · Δd",
-         "status": s2[0], "status_label": s2[1], "icon_svg": ILL.icon_metrics()},
-        {"title": "GPR 조성 공간 학습", "desc": "조성 → 지표 예측",
-         "status": s3[0], "status_label": s3[1], "icon_svg": ILL.icon_gpr()},
-        {"title": "Active Learning 추천", "desc": "다음 계산 지점 제안",
-         "status": s4[0], "status_label": s4[1], "icon_svg": ILL.icon_al()},
-    ]
-
-
-def page_overview():
-    rows = computed_ead_rows()
-    counts = metric_trainable_counts()
-
-    C.breadcrumb("홈", "Overview")
-
-    # ── 히어로 (네이비→틸 그라데이션 + 우측 SVG) ──
-    C.render_html(st, '<div class="hero"><div class="hero-left">'
-        '<div class="hero-eyebrow">MXene 표면 설계 · AI-DFT 스크리닝</div>'
-        '<div class="hero-title">배가스에서 유망한 Ti₂C MXene 표면 조성을<br>DFT와 AI로 탐색합니다</div>'
-        '<div class="hero-desc">표면 말단기(-O/-F/-OH) 조성에 따라 CO₂·H₂O·SO₂ 흡착이 '
-        '어떻게 달라지는지 DFT 계산 결과로부터 투명하게 산출하고, GPR 기반 Active Learning으로 '
-        '조성 공간을 스캔해 다음에 계산할 지점을 제안하도록 설계되었습니다. '
-        '모든 수치는 출처와 계산 조건(calc_group)까지 추적할 수 있습니다.</div>'
-        '</div>'
-        f'<div class="hero-right">{ILL.hero_mxene(animate=True)}</div>'
-        '</div>')
-    # 히어로 CTA (Streamlit 버튼)
-    cta1, cta2, _ = st.columns([1, 1, 2])
-    if cta1.button("정방향 검증 시작", use_container_width=True):
-        st.session_state["_nav"] = "정방향 검증"
-        st.rerun()
-    if cta2.button("데이터 레지스트리 보기", use_container_width=True):
-        st.session_state["_nav"] = "데이터 레지스트리"
-        st.rerun()
-
-    # ── 누가 어떻게 쓰나 (3 시나리오) ──
-    C.section_head(ILL.icon_al(), "누가 어떻게 쓰나")
-    st.caption("아래는 이 플랫폼이 상정한 사용 용도입니다 (도입 사례·성능 수치가 아닙니다).")
-    sc1, sc2, sc3 = st.columns(3)
-    C.render_html(sc1, C.scenario_card(
-        ILL.icon_metrics(), "공정·제조 R&D", "석유화학·제조 엔지니어",
-        "내 배가스 조건에서 어떤 표면이 유망한지 결론 카드와 흡착 에너지로 빠르게 비교하도록 설계."))
-    C.render_html(sc2, C.scenario_card(
-        ILL.icon_gpr(), "소재 설계", "화학·소재 기업 연구원",
-        "조성 삼각도와 추천 후보로 합성 방향(말단기 비율)을 탐색하도록 설계."))
-    C.render_html(sc3, C.scenario_card(
-        ILL.icon_dft(), "방법론·재현성", "대학·연구기관",
-        "계산 조건·출처·수식을 투명하게 공개해 재현성과 방법론을 확인하도록 설계."))
-
-    # ── 파이프라인 ──
-    C.section_head(ILL.icon_gpr(), "분석 파이프라인")
-    C.render_html(st, ILL.pipeline(_pipeline_steps(rows, counts)))
-
-    # ── KPI 4개 (높이 통일) ──
-    C.section_head(ILL.icon_metrics(), "현재 데이터 상태")
-    n_suspect = sum(1 for r in rows if r["suspect"])
-    c1, c2, c3, c4 = st.columns(4)
-    C.render_html(c1, C.kpi_equal(
-        "등록된 표면",
-        f'<div class="kpi-value">{len(registry.surfaces(entries))}</div>'))
-    C.render_html(c2, C.kpi_equal(
-        C.info_tooltip("E_ads", "계산 가능한 E_ads"),
-        f'<div class="kpi-value">{len(rows)}</div>'))
-    metric_bars = "".join(
-        f'<div style="margin-top:8px"><div class="hint">{METRIC_LABEL[m]}</div>'
-        f'{C.progress_bar(counts[m], gpr.MIN_TRAINING)}</div>'
-        for m in registry.ALL_METRICS
-    )
-    C.render_html(c3, C.kpi_equal(
-        "모델 학습 데이터",
-        '<div class="hint" style="margin-top:2px">지표가 계산된 표면 수 / '
-        f'{gpr.MIN_TRAINING}</div>',
-        bottom_html=metric_bars))
-    C.render_html(c4, C.kpi_equal(
-        "데이터 품질",
-        f'<div style="margin-top:8px">{C.quality_pill(n_suspect, bool(rows))}</div>'
-        '<div class="hint" style="margin-top:8px">마우스를 올리면 판정 기준이 표시됩니다.</div>'))
-
-    # ── E_ad 막대차트 + PNG 다운로드 ──
-    C.section_head(ILL.icon_metrics(), "계산 완료된 흡착 에너지")
-    if rows:
-        st.plotly_chart(charts.ead_bar(rows), use_container_width=True)
-        try:
-            png = fig_to_png_bytes(charts.ead_bar_png(rows))
-            st.download_button("차트 PNG 다운로드", data=png,
-                               file_name="ead_chart.png", mime="image/png")
-        except Exception:
-            st.caption("PNG 내보내기를 사용할 수 없습니다 (kaleido 미설치).")
-    else:
-        C.empty_state_svg(ILL.empty_chart(), "아직 계산 가능한 E_ad가 없습니다.",
-                          "데이터 레지스트리에서 clean·molecule·adsorbed 에너지를 추가하세요.")
-
-    # ── 다음에 필요한 계산 (조성 커버리지 우선) ──
-    C.section_head(ILL.icon_dft(), "다음에 필요한 계산")
-    coverage = C.composition_coverage(comp_map)
-    not_covered = [c for c in coverage if not c["covered"]]
-    cov_html = (
-        f'<div style="padding:4px 0 8px;border-bottom:1px solid {T.BORDER};margin-bottom:6px">'
-        f'<b style="font-size:13px">조성 커버리지</b> '
-        f'<span class="hint">보고서 정의 7개 조성 중 '
-        f'{len(coverage) - len(not_covered)}/{len(coverage)} 확정</span></div>'
-    )
-    if not_covered:
-        cov_html += "".join(
-            f'<div style="display:flex;gap:10px;padding:6px 0">'
-            f'{C.status_pill("pending", "표면 계산 필요")}'
-            f'<span style="font-size:13px"><b>{c["formula"]}</b> '
-            f'<span class="hint">({c["name"]})</span></span></div>'
-            for c in not_covered
-        )
-    else:
-        cov_html += ('<div class="hint" style="padding:6px 0">보고서 정의 7개 조성이 모두 '
-                     '확정되었습니다.</div>')
-
-    # 에너지 누락 체크리스트 (전역 우선)
-    missing = registry.missing_checklist(entries)
-    missing_sorted = sorted(missing, key=lambda m: 0 if m.scope == "전역" else 1)
-    miss_html = (
-        f'<div style="padding:10px 0 8px;border-top:1px solid {T.BORDER};'
-        f'border-bottom:1px solid {T.BORDER};margin:8px 0 6px">'
-        f'<b style="font-size:13px">에너지 데이터 누락</b></div>'
-    )
-    if missing_sorted:
-        miss_html += "".join(
-            f'<div style="display:flex;gap:10px;padding:6px 0">'
-            f'{C.status_pill("pending", "필요")}'
-            f'<span style="font-size:13px"><b>{m.scope}</b> — {m.detail}</span></div>'
-            for m in missing_sorted[:10]
-        )
-    else:
-        miss_html += '<div class="hint" style="padding:6px 0">누락 항목 없음.</div>'
-
-    C.card(cov_html + miss_html)
-
-    # ── 방법론 한눈에 (연구기관용, 접이식) ──
-    C.render_html(st, '<div id="방법론-한눈에"></div>')
-    with st.expander("방법론 한눈에 (소프트웨어 · 범함수 · 지표 정의)"):
-        C.render_html(st, f'<div class="hint" style="line-height:1.9">'
-            f'<b>소프트웨어</b>: Quantum ESPRESSO<br>'
-            f'<b>범함수 / 분산보정</b>: PBE-D3<br>'
-            f'<b>단위 변환</b>: 1 Ry = {RY_TO_EV} eV<br><br>'
-            f'<b>지표 정의</b><br>'
-            f'· {C.info_tooltip("E_ads", "E_ads")} = E_adsorbed − (E_clean + E_molecule)<br>'
-            f'· {C.info_tooltip("Preference Index", "P(CO₂/H₂O)")} = E_ads(H₂O) − E_ads(CO₂)<br>'
-            f'· {C.info_tooltip("Δd_surface", "Δd_surface")} = |mean(z_after) − mean(z_before)|'
-            f'</div>')
-        st.caption("서로 다른 calc_group의 값은 섞어서 계산하지 않습니다.")
-
-    # ── 기능 둘러보기 (6개 카테고리 카드) ──
-    C.section_head(NAV.CAT_ICONS["자료"], "기능 둘러보기")
-    cats = list(NAV.CATEGORIES.keys())
-    row1 = st.columns(3)
-    row2 = st.columns(3)
-    cols = row1 + row2
-    for col, cat in zip(cols, cats):
-        first_page = NAV.CATEGORIES[cat][0]
-        n_pages = len(NAV.CATEGORIES[cat])
-        C.render_html(col, f'<div class="cat-card"><div class="cc-ic">{NAV.CAT_ICONS[cat]}</div>'
-            f'<div class="cc-title">{cat}</div>'
-            f'<div class="cc-desc">{NAV.CAT_DESC[cat]} · {n_pages}개 페이지</div></div>')
-        if col.button(f"{cat} 열기", key=f"catbtn_{cat}", use_container_width=True):
-            st.session_state["_nav"] = first_page
-            st.rerun()
-
-    C.footer()
-
-
-# ═══════════════════════ 정방향 검증 ═══════════════════════
+# ═══════════════════════ 정방향 검증 (PDF 6.1) ═══════════════════════
 def page_forward():
-    C.page_header_bc("분석", "정방향 검증",
-                     "표면과 가스를 선택하면 계산 가능한 흡착 에너지와 선택성 지표를 보여줍니다.")
-
-    surf_list = registry.surfaces(entries)
-    if not surf_list:
-        C.empty_state("🧪", "표면 데이터가 없습니다.", "데이터 레지스트리에서 추가하세요.")
-        C.footer()
-        return
+    C.breadcrumb("분석", "정방향 검증")
+    C.page_header("정방향 검증", "표면 구성과 배가스 조건을 입력하면 지표와 분류를 보여줍니다.")
+    C.scope_banner()
 
     left, right = st.columns([1, 2], gap="large")
     with left:
-        C.section_title("입력")
-        surface = st.selectbox("표면", surf_list)
-        gas = st.selectbox("가스", GASES, format_func=lambda g: T.gas_meta(g)["label"])
-        comp = comp_map.get(surface)
-        # 선택한 표면의 말단기 구성 모식도
-        C.render_html(st, f'<div class="card card-tight" style="margin-top:6px">'
-            f'<div class="kpi-label">표면 말단기 구성</div>'
-            f'{ILL.surface_motif(comp)}</div>')
-        if comp is not None and not is_trainable(comp):
-            C.render_html(st, C.status_pill("pending", "조성 미확정 (OH 환산 확인 필요)"))
+        C.section_title("표면 구성")
+        xO = st.slider("xO (–O)", 0.0, 1.0, 1.0, 0.25)
+        xF = st.slider("xF (–F)", 0.0, 1.0, 0.0, 0.25)
+        xOH = st.slider("xOH (–OH)", 0.0, 1.0, 0.0, 0.25)
+        s = composition_sum(xO, xF, xOH)
+        if not is_normalized(xO, xF, xOH):
+            C.notice("suspect", f"합이 1이 아닙니다(현재 {s:.2f})",
+                     "세 비율의 합이 1이 되도록 맞춰 주세요.")
+        C.section_title("배가스 조건")
+        st.caption("T = 298.15 K 고정")
+        unit = st.radio("분율 단위", ["mol%", "ppm"], horizontal=True)
+        c1, c2, c3 = st.columns(3)
+        co2_raw = c1.text_input("CO₂", "12")
+        h2o_raw = c2.text_input("H₂O", "10")
+        so2_raw = c3.text_input("SO₂", "500" if unit == "ppm" else "0.05")
+        st.caption(COND_HINT)
 
     with right:
-        C.section_title(f"결과 — {T.gas_meta(gas)['label']} on {surface}")
-        r = registry.compute_ad_for(entries, surface, gas)
+        if not is_normalized(xO, xF, xOH):
+            C.empty_state("⚖", "조성 합을 1로 맞추면 결과가 표시됩니다.")
+            C.footer()
+            return
 
-        if not r.ok:
-            C.notice("pending", "계산할 수 없습니다 (pending)", r.reason)
+        # 가장 가까운 계산 조성
+        near = S.nearest_computed(entries, comp_map, xO, xF, xOH)
+        # 입력 조성과 일치하는 계산 표면이 있는지
+        matched = None
+        for surf in S.computed_surfaces(entries, comp_map):
+            c = comp_map[surf]
+            if abs(c.xO - xO) < 1e-6 and abs(c.xF - xF) < 1e-6 and abs(c.xOH - xOH) < 1e-6:
+                matched = surf
+                break
+
+        C.section_head(ILL.icon_metrics(), "흡착 에너지")
+        if matched:
+            # 계산값 표시
+            e = S.eads_for_surface(entries, matched)
+            rows_html = ""
+            for g in GASES:
+                r = e[g]
+                m = T.gas_meta(g)
+                if r.ok:
+                    unstable = " · 안정 흡착 아님" if r.E_ad_eV > 0 else ""
+                    rng = " · 범위 점검" if r.suspect else ""
+                    rows_html += (f'<div style="padding:6px 0;border-bottom:1px solid {T.BORDER}">'
+                                  f'{C.gas_pill(g)} <span class="mono" style="color:{m["color"]}">'
+                                  f'{r.E_ad_eV:.3f} eV</span> <span class="hint">(계산){unstable}{rng}</span></div>')
+                else:
+                    rows_html += (f'<div style="padding:6px 0;border-bottom:1px solid {T.BORDER}">'
+                                  f'{C.gas_pill(g)} {C.status_pill("pending", "데이터 없음")} '
+                                  f'<span class="hint">{r.reason}</span></div>')
+            C.card(rows_html)
+            _forward_metrics(matched, co2_raw, h2o_raw, so2_raw, unit)
         else:
-            label, kind = C.adsorption_interpretation(r.E_ad_eV)
-            C.card(
-                f'<div class="kpi-label">흡착 에너지 (E_ads)</div>'
-                f'<div class="hero-value" style="color:{T.PRIMARY}">{r.E_ad_eV:.3f}'
-                f'<span class="hero-unit">eV</span></div>'
-                f'<div class="mono hint" style="margin-top:2px">{r.E_ad_Ry:.5f} Ry</div>'
-                f'<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">'
-                f'{C.status_pill(kind, label)}'
-                + (C.status_pill("suspect", "suspect: 비현실적 범위") if r.suspect else "")
-                + f'{C.status_pill("ok", "계산됨")}</div>'
-                + '<div class="hint" style="margin-top:10px">※ 분류 기준은 본 플랫폼의 '
-                  '가정이며 문헌 기준이 아님.</div>'
-            )
-            with st.expander("해석 배지 분류 기준 보기"):
-                C.render_html(st, C.interpretation_legend_html())
-            if r.suspect:
-                C.notice("suspect", "의심값 경고",
-                         "E_ad가 물리적으로 비현실적 범위([-3, +0.5] eV)를 벗어났습니다. 입력 데이터를 재확인하세요.")
-
-            with st.expander("계산 과정 보기 (세 에너지 값 · 뺄셈 식 · Ry→eV 변환)"):
-                comps = r.components
-                drows = []
-                for lbl, key in [("E_adsorbed", "E_adsorbed"), ("E_clean", "E_clean"),
-                                 ("E_molecule", "E_molecule")]:
-                    cc = comps.get(key)
-                    if cc:
-                        drows.append({
-                            "항목": lbl,
-                            "energy_Ry": cc["energy_Ry"],
-                            "energy_eV": ry_to_ev(cc["energy_Ry"]),
-                            "source_file": cc["source_file"],
-                            "calc_group": cc["calc_group"],
-                        })
-                st.dataframe(pd.DataFrame(drows), width='stretch', hide_index=True)
-                C.render_html(st, f'<div class="hint" style="line-height:1.9">'
-                    f'<b>식:</b> E_ad = E_adsorbed − (E_clean + E_molecule)<br>'
-                    f'= <span class="mono">{r.E_ad_Ry:.5f}</span> Ry '
-                    f'= <span class="mono">{r.E_ad_Ry:.5f} × {RY_TO_EV}</span> '
-                    f'= <span class="mono" style="color:{T.PRIMARY};font-weight:600">{r.E_ad_eV:.3f} eV</span><br>'
-                    f'calc_group = <span class="mono">{r.calc_group}</span> (세 값 모두 동일 확인됨)'
-                    f'</div>')
-                srcs = "".join(
-                    C.source_chip(comps[k]["source_file"], comps[k]["calc_group"]) + " "
-                    for k in ("E_adsorbed", "E_clean", "E_molecule") if comps.get(k)
-                )
-                C.render_html(st, f'<div style="margin-top:8px">{srcs}</div>')
-
-        # 선택성 지표
-        C.render_html(st, '<div class="section-title">선택성 지표 '
-            f'({C.info_tooltip("Preference Index", "Preference Index")})</div>')
-        e_co2 = registry.compute_ad_for(entries, surface, "CO2")
-        e_h2o = registry.compute_ad_for(entries, surface, "H2O")
-        e_so2 = registry.compute_ad_for(entries, surface, "SO2")
-        p_h2o = selectivity_P("P(CO2/H2O)", e_h2o, e_co2, "H2O")
-        p_so2 = selectivity_P("P(CO2/SO2)", e_so2, e_co2, "SO2")
-        dd = delta_d(geom_map.get((surface, "SO2")))
-
-        def metric_line(name, ok, value_ev, value_ry, reason, cg):
-            if ok:
-                return (f'<div style="padding:8px 0;border-bottom:1px solid {T.BORDER}">'
-                        f'<b>{name}</b> &nbsp;'
-                        f'<span class="mono" style="color:{T.PRIMARY}">{value_ev:.3f} eV</span> '
-                        f'<span class="mono hint">({value_ry:.5f} Ry)</span> &nbsp;'
-                        f'{C.status_pill("ok", "group " + str(cg))}</div>')
-            return (f'<div style="padding:8px 0;border-bottom:1px solid {T.BORDER}">'
-                    f'<b>{name}</b> &nbsp;{C.status_pill("pending", "pending")} '
-                    f'<span class="hint">{reason}</span></div>')
-
-        html_block = (
-            metric_line("P(CO₂/H₂O)", p_h2o.ok, p_h2o.value_eV, p_h2o.value_Ry, p_h2o.reason, p_h2o.calc_group)
-            + metric_line("P(CO₂/SO₂)", p_so2.ok, p_so2.value_eV, p_so2.value_Ry, p_so2.reason, p_so2.calc_group)
-        )
-        if dd.ok:
-            html_block += (f'<div style="padding:8px 0"><b>Δd_surface</b> &nbsp;'
-                           f'<span class="mono" style="color:{T.PRIMARY}">{dd.value:.4f}</span> &nbsp;'
-                           f'{C.source_chip(dd.source_file, dd.calc_group)}</div>')
-        else:
-            html_block += (f'<div style="padding:8px 0"><b>Δd_surface</b> &nbsp;'
-                           f'{C.status_pill("pending", "pending")} '
-                           f'<span class="hint">{dd.reason}</span></div>')
-        C.card(html_block)
-
+            # 계산값 없음 → 예측 (GPR 활성 시) 또는 데이터 없음
+            C.notice("info", "이 조성의 계산값이 없습니다.",
+                     (f"가장 가까운 계산 조성: {near['surface']} "
+                      f"(거리 {near['distance']:.3f})" if near else "계산된 조성이 없습니다."))
+            _forward_prediction(xO, xF, xOH)
     C.footer()
 
 
-# ═══════════════════════ 역방향 추천 ═══════════════════════
+def _forward_metrics(surface, co2_raw, h2o_raw, so2_raw, unit):
+    """계산값 기반 P·분류."""
+    p = S.p_indices(entries, surface)
+    # 조건 보정
+    try:
+        if unit == "ppm":
+            p_co2 = ppm_to_molpct(float(co2_raw))
+            p_h2o = ppm_to_molpct(float(h2o_raw))
+            p_so2 = ppm_to_molpct(float(so2_raw))
+        else:
+            p_co2, p_h2o, p_so2 = float(co2_raw), float(h2o_raw), float(so2_raw)
+        cc = S.condition_correction(p_co2, p_h2o, p_so2)
+    except ValueError:
+        cc = None
+
+    C.section_title("CO₂ 선호도 (Preference Index)")
+    ph = p["P(CO2/H2O)"]
+    ps = p["P(CO2/SO2)"]
+    html = ""
+    if ph.ok:
+        extra = " · 두 가스 모두 안정 흡착 아님" if ph.two_gas_unstable else ""
+        html += (f'<div style="padding:6px 0"><b>P(CO₂/H₂O)</b> '
+                 f'<span class="mono" style="color:{T.PRIMARY}">{ph.value_eV:.3f} eV</span>{extra}</div>')
+    else:
+        html += (f'<div style="padding:6px 0"><b>P(CO₂/H₂O)</b> '
+                 f'{C.status_pill("pending", "데이터 없음")} <span class="hint">{ph.reason}</span></div>')
+    if ps.ok:
+        sc = " · 구조 변화 동반" if ps.structure_change else ""
+        html += (f'<div style="padding:6px 0"><b>P(CO₂/SO₂)</b> '
+                 f'<span class="mono hint">{ps.value_eV:.3f} eV (참고용{sc})</span></div>')
+    else:
+        html += (f'<div style="padding:6px 0"><b>P(CO₂/SO₂)</b> '
+                 f'{C.status_pill("pending", "데이터 없음")} <span class="hint">{ps.reason}</span></div>')
+    C.card(html)
+
+    # 분류 (P(CO2/H2O) 기준)
+    C.section_title("분류")
+    e_co2 = S.compute_ad_for(entries, surface, "CO2")
+    if ph.ok and cc and cc.delta_h2o is not None:
+        p_cond = ph.value_eV + cc.delta_h2o
+        inp = ClassifyInput(mu_p_cond=p_cond, sigma_p=0.0,
+                            mu_eads_co2=e_co2.E_ad_eV if e_co2.ok else None,
+                            reaction_flag="none")
+        res = classify(inp, settings.kappa, settings.margin_m_eV,
+                       settings.delta_d_max_A, settings.sigma_max_eV, settings.preset,
+                       settings.wide_range)
+        C.render_html(st, _class_badge(res.label))
+        C.card('<div class="hint">근거: ' + " · ".join(res.reasons) + "</div>")
+        st.caption(f"{COND_NOTE}: δ_H₂O = {cc.delta_h2o:+.3f} eV → "
+                   f"P_cond(CO₂/H₂O) = {p_cond:+.3f} eV")
+    else:
+        inp = ClassifyInput(mu_p_cond=None,
+                            missing=S.missing_for_P(entries, surface))
+        res = classify(inp, settings.kappa, settings.margin_m_eV,
+                       settings.delta_d_max_A, settings.sigma_max_eV, settings.preset)
+        C.render_html(st, _class_badge(res.label))
+        if res.needed:
+            C.card('<div class="hint">필요한 계산: ' + " · ".join(res.needed) + "</div>")
+
+    # 계산 과정 보기
+    with st.expander("계산 과정 보기 (세 에너지 값 · 뺄셈 식 · Ry→eV · 출처)"):
+        for g in GASES:
+            r = S.compute_ad_for(entries, surface, g)
+            if not r.ok:
+                st.markdown(f"**{g}**: {r.reason}")
+                continue
+            comps = r.components
+            st.markdown(
+                f"**{g}** · E_ads = E_complex − (E_surface + E_gas) = "
+                f"`{r.E_ad_Ry:.5f} Ry` = `{r.E_ad_Ry:.5f} × {RY_TO_EV}` = "
+                f"**{r.E_ad_eV:.3f} eV** · calc_group `{r.calc_group}`")
+            chips = "".join(C.source_chip(comps[k]["source_file"], comps[k]["calc_group"]) + " "
+                            for k in ("E_adsorbed", "E_clean", "E_molecule") if comps.get(k))
+            st.markdown(chips, unsafe_allow_html=True)
+
+
+def _forward_prediction(xO, xF, xOH):
+    """임의 조성 예측 (GPR 활성 시 μ±σ, 아니면 데이터 없음)."""
+    models = get_models()
+    C.section_title("예측 (GPR)")
+    any_active = False
+    html = ""
+    uv = np.array([__import__("core.coords", fromlist=["to_uv"]).to_uv(xO, xF, xOH)])
+    for t in ["Eads_CO2", "Eads_H2O", "Eads_SO2"]:
+        m = models[t]
+        if isinstance(m, G.GprModel):
+            any_active = True
+            mu, sigma = m.predict(uv)
+            html += (f'<div style="padding:6px 0"><b>{t}</b> '
+                     f'<span class="mono">{mu[0]:.3f} ± {sigma[0]:.3f} eV</span> '
+                     f'<span class="hint">(예측)</span></div>')
+        else:
+            html += (f'<div style="padding:6px 0"><b>{t}</b> '
+                     f'{C.status_pill("pending", m.message)}</div>')
+    C.card(html)
+    if not any_active:
+        C.notice("pending", "GPR 모델이 아직 비활성입니다.",
+                 f"타깃별 학습 데이터가 {settings.min_train_points}개에 도달하면 예측이 활성화됩니다.")
+    else:
+        st.caption(G.SIGMA_NOTE)
+
+
+# ═══════════════════════ 역방향 추천 (PDF 6.2) ═══════════════════════
 def page_reverse():
     C.breadcrumb("설계", "역방향 추천")
-    # 헤더에 삼각도 모티프 (현재 확정 조성 좌표를 점으로)
-    tri = ILL.composition_triangle(size=30, points=confirmed_composition_points())
-    C.render_html(st, f'<div style="display:flex;align-items:center;gap:10px">{tri}'
-        f'<div class="page-title">역방향 추천</div></div>'
-        '<div class="page-sub">'
-        f'{C.info_tooltip("GPR", "GPR")}이 조성 삼각 공간을 스캔해 최적 조성 후보와 '
-        f'{C.info_tooltip("Active Learning", "다음 계산 지점")}을 추천합니다.</div>')
-    C.notice("info", gpr.SIGMA_DISCLAIMER)
+    C.page_header("역방향 추천", "조성 격자를 평가해 우선 검토 후보를 제안합니다.")
+    C.scope_banner()
 
-    # 지표별 모델 상태 — 세 지표(P 2종 + Δd)를 동일 로직으로 처리
-    models, scans = {}, {}
-    status_html = ""
-    for metric in registry.ALL_METRICS:
-        pts = registry.trainable_points_for_metric(entries, comp_map, metric, geom_map)
-        model = gpr.fit_metric_model(pts, metric)
-        label = METRIC_LABEL[metric]
-        if isinstance(model, gpr.GprUnavailable):
-            status_html += (f'<div style="padding:6px 0">{label} &nbsp;'
-                            f'{C.status_pill("pending", model.message)}</div>')
-        else:
-            models[metric] = model
-            scans[metric] = gpr.scan_ternary(model, step=20)
-            status_html += (f'<div style="padding:6px 0">{label} &nbsp;'
-                            f'{C.status_pill("ok", f"활성 (N={model.n})")}</div>')
-
-    C.section_title("지표별 모델 상태")
-    C.card(status_html)
-
-    # ── 조성 커버리지 삼각도 (보고서 7개 조성) ──
-    C.section_head(ILL.icon_dft(), "조성 커버리지 삼각도")
-    cov_points = []
-    for item in C.REPORT_COMPOSITIONS:
-        coord = item["coord"]
-        # 상태: 확정 표면 좌표와 일치하면 done, 미확정 표면이면 unconfirmed, 그 외 planned
-        state = "planned"
-        if coord is not None:
-            for c in comp_map.values():
-                if C._coord_matches(c, coord):
-                    state = "done" if c.confirmed else "unconfirmed"
-                    break
-        cov_points.append({"coord": coord, "state": state, "label": item["formula"]})
-    legend = (
-        '<div class="cov-legend">'
-        '<span class="ci"><svg width="14" height="14"><circle cx="7" cy="7" r="5" '
-        'fill="var(--ill-accent)"/></svg> 계산·확정</span>'
-        '<span class="ci"><svg width="14" height="14"><circle cx="7" cy="7" r="5" '
-        'fill="none" stroke="var(--ill-accent)" stroke-width="2"/></svg> 계획</span>'
-        '<span class="ci"><svg width="14" height="14"><circle cx="7" cy="7" r="5" '
-        'fill="none" stroke="var(--ill-f)" stroke-width="2" stroke-dasharray="2 2"/></svg> '
-        '조성 미확정</span></div>'
-    )
-    C.render_html(st, f'<div class="card">{ILL.coverage_triangle(cov_points)}{legend}'
-        f'<div class="ill-caption">개념도 — 실제 계산 구조·결과가 아님</div></div>')
-
-    if not models:
-        # 데이터 부족: 흐린 삼각도 미리보기 + 자물쇠 + 진행바 + "N개 더 필요"
-        counts = metric_trainable_counts()
-        best = max(counts.values()) if counts else 0
-        need_more = max(0, gpr.MIN_TRAINING - best)
-        blur_tri = ILL.composition_triangle(size=120, points=confirmed_composition_points())
-        bars = "".join(
-            f'<div style="margin-top:8px;text-align:left"><div class="hint">{METRIC_LABEL[m]} '
-            f'<span class="hint">({max(0, gpr.MIN_TRAINING - counts[m])}개 더 필요)</span></div>'
-            f'{C.progress_bar(counts[m], gpr.MIN_TRAINING)}</div>'
-            for m in registry.ALL_METRICS
+    models = get_models()
+    active = [t for t in G.TARGETS if isinstance(models[t], G.GprModel)]
+    if not active:
+        # 잠금 화면
+        C.section_head(ILL.icon_gpr(), "추천 잠금")
+        bars = ""
+        label_map = {"Eads_CO2": "Eads(CO₂)", "Eads_H2O": "Eads(H₂O)",
+                     "Eads_SO2": "Eads(SO₂)", "Delta_d": "Δd"}
+        for t in G.TARGETS:
+            m = models[t]
+            bars += (f'<div style="margin-top:8px;text-align:left"><div class="hint">{label_map[t]}</div>'
+                     f'{C.progress_bar(m.n, settings.min_train_points)}</div>')
+        st.markdown(
+            html_block_wrap('<div class="card" style="text-align:center">'
+                            f'<div style="font-size:28px">🔒</div>'
+                            f'<div style="font-weight:600;margin-top:6px">GPR 학습 데이터 부족</div>'
+                            f'<div class="hint" style="margin:4px 0 12px">타깃별 학습 데이터가 '
+                            f'{settings.min_train_points}개에 도달하면 추천이 활성화됩니다. '
+                            f'아직 계산하지 않은 계획 조성을 먼저 계산하세요.</div>'
+                            f'<div style="max-width:420px;margin:0 auto">{bars}</div></div>'),
+            unsafe_allow_html=True,
         )
-        C.section_head(ILL.icon_gpr(), "조성 공간 미리보기")
-        C.render_html(st, '<div class="card" style="text-align:center">'
-            f'<div class="locked" style="display:inline-block">{blur_tri}</div>'
-            f'<div style="margin-top:4px">{ILL.empty_locked()}</div>'
-            f'<div style="font-weight:600">조성 스캔 잠김</div>'
-            f'<div class="hint" style="margin:4px 0 12px">가장 진척된 지표 기준으로 '
-            f'데이터가 <b>{need_more}개 더 필요</b>합니다. 각 지표가 계산된 표면이 '
-            f'{gpr.MIN_TRAINING}개에 도달하면 해당 지표의 삼각 조성도와 추천이 활성화됩니다.</div>'
-            f'<div style="max-width:420px;margin:0 auto">{bars}</div>'
-            '</div>')
+        # 필요한 계산(계획 조성) 안내
+        planned = [c for c in comp_map.values() if c.status == "planned"]
+        if planned:
+            items = "".join(
+                f'<div style="padding:6px 0;border-bottom:1px solid {T.BORDER}">'
+                f'{C.status_pill("pending", "계획")} <b>{c.surface}</b> '
+                f'<span class="hint">{c.arrangement_note}</span></div>'
+                for c in planned)
+            C.section_title("먼저 계산할 계획 조성")
+            C.card(items)
         C.footer()
         return
 
-    # 활성화: ternary + 추천
-    for metric, scan in scans.items():
-        C.section_title(f"조성 공간 스캔 — {metric}")
-        st.plotly_chart(charts.ternary_scan(scan.grid, scan.mu, scan.sigma, metric),
-                        use_container_width=True)
-        cand = gpr.next_al_candidate(scan)
-        comp_str = ", ".join(f"{x:.2f}" for x in cand["composition"])
-        C.card(
-            f'<div class="kpi-label">Active Learning 다음 계산 후보 (σ 최대)</div>'
-            f'<div style="margin-top:6px">{C.status_pill("info", "추천 측정 지점")} '
-            f'<span class="mono">[xO,xF,xOH] = [{comp_str}]</span> &nbsp;'
-            f'<span class="mono hint">μ={cand["mu"]:.3f} · σ={cand["sigma"]:.3f}</span></div>',
-            tight=True,
-        )
-
-    # Pareto
-    C.section_title("추천 조성 (Pareto 상위)")
-    front = gpr.pareto_front(scans)
-    if front:
-        cols = st.columns(min(3, len(front)))
-        for i, cand in enumerate(front[:3]):
-            comp_str = ", ".join(f"{x:.2f}" for x in cand["composition"])
-            metrics_html = "<br>".join(
-                f'<span class="hint">{k}:</span> <span class="mono">{v:.3f}</span>'
-                for k, v in cand.items() if k != "composition"
-            )
-            C.render_html(cols[i], f'<div class="card"><div class="kpi-label">후보 #{i+1}</div>'
-                f'<div class="mono" style="font-size:15px;margin:6px 0;color:{T.PRIMARY}">[{comp_str}]</div>'
-                f'{metrics_html}</div>')
-        st.caption("활성화된 지표만 Pareto 목적함수에 포함됩니다.")
-
-    # ── 사용자 우선순위 가중 정렬 (활성 지표 한정) ──
-    pr = st.session_state.get("priority", {"w_h2o": 0.5, "w_so2": 0.5, "w_dd": 0.5})
-    if front:
-        C.section_head(ILL.icon_al(), "사용자 우선순위 가중 정렬")
-        st.caption("사용자 지정 우선순위에 따른 정렬이며 물리 모델이 아닙니다. "
-                   "활성화된 지표만 반영됩니다.")
-        weight_map = {"P(CO2/H2O)": pr["w_h2o"], "P(CO2/SO2)": pr["w_so2"], "Δd": pr["w_dd"]}
-
-        def score(cand):
-            # P는 클수록(가중 +), Δd는 작을수록(가중 -) 선호
-            s = 0.0
-            for k, v in cand.items():
-                if k == "composition":
-                    continue
-                w = weight_map.get(k, 0.0)
-                s += (w * v) if k.startswith("P(") else (-w * v)
-            return s
-
-        ranked = sorted(front, key=score, reverse=True)
-        rows_html = ""
-        for i, cand in enumerate(ranked[:5]):
-            comp_str = ", ".join(f"{x:.2f}" for x in cand["composition"])
-            rows_html += (f'<div style="display:flex;gap:10px;padding:8px 0;'
-                          f'border-bottom:1px solid {T.BORDER}">'
-                          f'<b style="min-width:40px">#{i+1}</b>'
-                          f'<span class="mono" style="color:{T.PRIMARY}">[{comp_str}]</span> '
-                          f'<span class="mono hint">가중점수 {score(cand):.3f}</span></div>')
-        C.card(rows_html)
-
+    # 활성 시: 격자 평가 (요약)
+    C.notice("info", "활성 모델로 격자를 평가합니다.",
+             "P 계산에 두 Eads 예측이 모두 필요합니다.")
     C.footer()
 
 
-# ═══════════════════════ 모델 품질 ═══════════════════════
-def page_quality():
-    C.breadcrumb("모델", "모델 품질")
-    C.render_html(st, '<div class="page-title">모델 품질</div>'
-        f'<div class="page-sub">{C.info_tooltip("LOOCV", "LOOCV")}로 실제 계산된 성능 수치만 '
-        '표시합니다. 추정값은 쓰지 않습니다.</div>')
-    # 지표 3개 각각 별도로 표시: ok면 KPI + parity plot, 아니면 빈 상태 카드
-    for metric in registry.ALL_METRICS:
-        pts = registry.trainable_points_for_metric(entries, comp_map, metric, geom_map)
-        q = loocv(pts, metric)
-        C.section_title(METRIC_LABEL[metric])
-        if not q.ok:
-            C.empty_state_svg(ILL.empty_chart(), f"데이터 {gpr.MIN_TRAINING}개 이상 필요",
-                              f"현재 {q.n}개 — LOOCV로 성능을 계산하려면 "
-                              f"지표가 계산된 표면이 {gpr.MIN_TRAINING}개 이상이어야 합니다.")
+def html_block_wrap(s):
+    return s
+
+
+# ═══════════════════════ 조성 지도 (PDF 6.3) ═══════════════════════
+def page_map():
+    C.breadcrumb("분석", "조성 지도")
+    C.page_header("조성 지도", "삼원 조성 공간에서 계산·계획 조성과 지표를 봅니다.")
+    C.scope_banner()
+
+    tab = st.radio("지표", ["Eads(CO₂)", "Eads(H₂O)", "Eads(SO₂)", "P(CO₂/H₂O)", "Δd"],
+                   horizontal=True)
+
+    markers = []
+    gas_of = {"Eads(CO₂)": "CO2", "Eads(H₂O)": "H2O", "Eads(SO₂)": "SO2"}
+    for surf, c in comp_map.items():
+        if c.xO is None:
+            # 미확정 — 삼각형에 그릴 좌표 없음 → 표시 생략(별도 안내)
             continue
-        c1, c2, c3, c4 = st.columns(4)
-        C.render_html(c1, C.kpi_card("학습 데이터", str(q.n), "개"))
-        C.render_html(c2, C.kpi_card("MAE", f"{q.mae:.4f}", "eV"))
-        C.render_html(c3, C.kpi_card("RMSE", f"{q.rmse:.4f}", "eV"))
-        C.render_html(c4, C.kpi_card("R²", f"{q.r2:.4f}"))
-        # 예측-실측 parity plot (LOOCV ok일 때만)
-        st.plotly_chart(
-            charts.parity_plot(q.y_true, q.y_pred, METRIC_LABEL[metric]),
-            use_container_width=True,
-        )
+        kind = "computed" if (c.confirmed and surf in S.computed_surfaces(entries, comp_map)) \
+            else "planned"
+        value = None
+        if tab in gas_of and kind == "computed":
+            r = S.compute_ad_for(entries, surf, gas_of[tab])
+            value = r.E_ad_eV if r.ok else None
+        markers.append({"xO": c.xO, "xF": c.xF, "xOH": c.xOH,
+                        "kind": kind, "value": value, "label": surf})
+
+    unit = "eV" if tab != "Δd" else "Å"
+    st.plotly_chart(charts.composition_map(markers, tab, unit), use_container_width=True)
+    st.caption("◆ 계산값 · 빈 원 계획 조성 · ✕ 조성 미확정은 좌표가 없어 지도에 표시되지 않습니다.")
+
+    # 미확정 표면 안내
+    unconf = [s for s, c in comp_map.items() if not c.confirmed and c.xO is None]
+    if unconf:
+        C.notice("pending", f"조성 미확정: {', '.join(unconf)}",
+                 "좌표가 확정되면 지도와 GPR 학습에 포함됩니다.")
     C.footer()
 
 
-# ═══════════════════════ 데이터 레지스트리 ═══════════════════════
-def page_registry_view():
-    C.page_header_bc("데이터", "데이터 레지스트리",
-                     "모든 에너지 항목·출처·calc_group·상태를 확인하고, CSV로 새 데이터를 반영합니다.")
-
-    # 데이터 신뢰 원칙 3줄 카드
-    C.render_html(st, '<div class="trust-card">'
-        '<div class="kpi-label" style="margin-bottom:6px">데이터 신뢰 원칙</div>'
-        '<div class="trust-item"><span class="ti-ic">✓</span>'
-        '<span>모든 값은 <span class="mono">data/energies.csv</span>에서 읽으며, 코드에 '
-        '하드코딩하지 않습니다.</span></div>'
-        '<div class="trust-item"><span class="ti-ic">✓</span>'
-        f'<span>모든 수치에 출처(source_file)와 {C.info_tooltip("calc_group", "calc_group")}을 '
-        '함께 표시합니다.</span></div>'
-        '<div class="trust-item"><span class="ti-ic">✓</span>'
-        '<span>서로 다른 calc_group의 값은 섞지 않고 계산을 거부합니다.</span></div>'
-        '</div>')
+# ═══════════════════════ 데이터·QC ═══════════════════════
+def page_data_qc():
+    C.breadcrumb("데이터", "데이터·QC")
+    C.page_header("데이터·QC", "에너지 데이터와 품질 점검을 확인하고 CSV를 업로드합니다.")
 
     if load_errors:
         C.notice("suspect", "로드 중 거부된 행이 있습니다",
-                 "스키마를 위반한 행은 반영되지 않았습니다. 아래 표에서 사유를 확인하세요.")
+                 "스키마 위반·중복 source_file 등은 반영되지 않았습니다.")
         st.dataframe(pd.DataFrame([{"행": e.row_index, "사유": e.reason} for e in load_errors]),
-                     width='stretch', hide_index=True)
+                     use_container_width=True, hide_index=True)
 
-    # 상태 요약 pill
-    n_ok = sum(1 for e in entries if e.status == "ok")
-    n_pending = sum(1 for e in entries if e.status == "pending")
-    n_suspect = sum(1 for e in entries if e.status == "suspect")
-    C.render_html(st, '<div style="display:flex;gap:8px;margin-bottom:12px">'
-        + C.status_pill("ok", f"ok {n_ok}") + C.status_pill("pending", f"pending {n_pending}")
-        + C.status_pill("suspect", f"suspect {n_suspect}") + '</div>')
-
-    # 검색/필터
-    C.section_title("에너지 항목")
-    f1, f2, f3 = st.columns([2, 1, 1])
-    query = f1.text_input("검색 (key · 표면 · 파일명)", "")
-    role_filter = f2.selectbox("role", ["전체", "molecule", "clean", "adsorbed"])
-    group_filter = f3.selectbox("calc_group", ["전체"] + sorted({e.calc_group for e in entries}))
-
-    def match(e):
-        if query and query.lower() not in f"{e.key} {e.surface} {e.gas} {e.source_file}".lower():
-            return False
-        if role_filter != "전체" and e.role != role_filter:
-            return False
-        if group_filter != "전체" and e.calc_group != group_filter:
-            return False
-        return True
-
-    filtered = [e for e in entries if match(e)]
-
-    # calc_group별 그룹 헤더로 묶어 표시
-    if filtered:
-        for cg in sorted({e.calc_group for e in filtered}):
-            grp = [e for e in filtered if e.calc_group == cg]
-            C.render_html(st, f'<div style="margin:14px 0 6px"><span class="pill" '
-                f'style="background:#F1F5F9;color:{T.TEXT};'
-                f'border-color:{T.BORDER}">calc_group {cg}</span> '
-                f'<span class="hint">{len(grp)}개 항목</span></div>')
-            df = pd.DataFrame([{
-                "key": e.key, "role": e.role, "surface": e.surface, "gas": e.gas,
-                "energy_Ry": e.energy_Ry, "energy_eV": ry_to_ev(e.energy_Ry),
-                "source_file": e.source_file, "status": e.status,
-            } for e in grp])
-            st.dataframe(df, width='stretch', hide_index=True)
-        # 다운로드
-        all_df = pd.DataFrame([{
+    # calc_group별 그룹 헤더
+    C.section_title("에너지 데이터")
+    for cg in sorted({e.calc_group for e in entries}):
+        grp = [e for e in entries if e.calc_group == cg]
+        st.markdown(f'<div class="hint" style="margin:10px 0 4px"><b>calc_group {cg}</b> '
+                    f'· {len(grp)}건</div>', unsafe_allow_html=True)
+        df = pd.DataFrame([{
             "key": e.key, "role": e.role, "surface": e.surface, "gas": e.gas,
-            "energy_Ry": e.energy_Ry, "energy_eV": ry_to_ev(e.energy_Ry),
-            "source_file": e.source_file, "calc_group": e.calc_group, "status": e.status,
-        } for e in filtered])
-        st.download_button("필터된 결과 CSV 다운로드",
-                           data=df_to_csv_bytes(ensure_provenance_columns(all_df)),
-                           file_name="energies_registry.csv", mime="text/csv")
-    else:
-        C.empty_state("🔍", "조건에 맞는 항목이 없습니다.", "검색어나 필터를 바꿔보세요.")
-
-    # 조성 매핑
-    C.section_title("조성 매핑")
-    comp_rows = [{
-        "surface": s, "xO": c.xO, "xF": c.xF, "xOH": c.xOH, "confirmed": c.confirmed,
-        "상태": "학습 가능" if is_trainable(c) else "조성 미확정",
-    } for s, c in comp_map.items()]
-    if comp_rows:
-        st.dataframe(pd.DataFrame(comp_rows), width='stretch', hide_index=True)
+            "energy_Ry": e.energy_Ry, "energy_eV": round(ry_to_ev(e.energy_Ry), 6),
+            "source_file": e.source_file, "status": e.status,
+            "reaction_flag": e.reaction_flag,
+        } for e in grp])
+        st.dataframe(df, use_container_width=True, hide_index=True)
 
     # 누락 체크리스트
-    C.section_title("계산에 필요하지만 아직 없는 항목")
-    missing = registry.missing_checklist(entries)
+    C.section_title("누락 항목 체크리스트")
+    missing = []
+    h2o_mol = S.find_molecule(entries, "H2O")
+    if h2o_mol is None or h2o_mol.status == "pending":
+        missing.append("H₂O 계산 데이터 없음 (짝 calc_group 미지정)")
+    for surf in S.surfaces(entries):
+        for g in GASES:
+            if S.find_adsorbed(entries, surf, g) is None and comp_map.get(surf) \
+               and comp_map[surf].confirmed:
+                missing.append(f"{surf} + {g} 복합체 없음")
     if missing:
-        st.dataframe(pd.DataFrame([{"범위": m.scope, "누락 내용": m.detail} for m in missing]),
-                     width='stretch', hide_index=True)
+        C.card("".join(f'<div style="padding:4px 0">{C.status_pill("pending", "필요")} '
+                       f'<span class="hint">{m}</span></div>' for m in missing[:12]))
     else:
         C.notice("ok", "누락 항목이 없습니다.")
 
-    # 업로드 (드래그앤드롭)
-    C.section_title("CSV 업로드 / 추가")
-    st.caption("업로드한 CSV는 스키마 검증을 통과해야만 반영됩니다. 코드 수정 없이 데이터가 반영됩니다.")
-    up = st.file_uploader("energies.csv 형식 파일을 끌어다 놓으세요", type=["csv"])
+    # QC 결과
+    C.section_title("QC 점검")
+    qc_html = ""
+    # 기준 점검(8~10 Å) 데이터 유무
+    far = [e for e in entries if e.min_distance_after is not None
+           and e.min_distance_after >= 8.0]
+    qc_html += (f'<div style="padding:4px 0">{C.status_pill("pending", "데이터 없음") if not far else C.status_pill("ok", "있음")} '
+                f'<span class="hint">프로젝트 기준 점검(8~10 Å) 데이터</span></div>')
+    # min_distance_after 배지
+    detached = [e.key for e in entries if e.min_distance_after is not None
+                and e.min_distance_after >= settings.min_distance_far_threshold]
+    if detached:
+        qc_html += (f'<div style="padding:4px 0">{C.status_pill("info", "붙지 않고 떨어진 구조")} '
+                    f'<span class="hint">{", ".join(detached)}</span></div>')
+    # Δd geometry
+    qc_html += (f'<div style="padding:4px 0">{C.status_pill("pending", "데이터 없음")} '
+                f'<span class="hint">Δd(geometry) 데이터 — SO₂ 계산 z 좌표</span></div>')
+    C.card(qc_html)
+
+    # CSV 업로드 (미리보기 → 확인 → 백업)
+    C.section_title("CSV 업로드")
+    st.caption("업로드 전 미리보기와 스키마·충돌 검사를 거쳐 확인 후에만 반영됩니다. "
+               "반영 시 data/backup/ 에 백업합니다.")
+    up = st.file_uploader("energies.csv 형식", type=["csv"])
     if up is not None:
         content = up.read().decode("utf-8")
         reader = pd.read_csv(io.StringIO(content), dtype=str, keep_default_na=False)
-        res = parse_rows(list(reader.columns), reader.to_dict(orient="records"))
+        res = parse_rows(list(reader.columns), reader.to_dict("records"))
         if res.errors:
-            C.notice("suspect", "스키마 위반으로 반영이 거부되었습니다")
+            C.notice("suspect", "스키마·충돌 검사 실패 — 반영 거부")
             st.dataframe(pd.DataFrame([{"행": e.row_index, "사유": e.reason} for e in res.errors]),
-                         width='stretch', hide_index=True)
+                         use_container_width=True, hide_index=True)
         else:
-            st.session_state["uploaded_entries"] = res.entries
-            st.session_state["uploaded_errors"] = []
-            C.notice("ok", f"{len(res.entries)}개 항목이 반영되었습니다.",
-                     "페이지를 새로고침하면 전체에 적용됩니다.")
-    if "uploaded_entries" in st.session_state:
-        if st.button("업로드 데이터 지우고 기본 CSV로 복귀"):
-            del st.session_state["uploaded_entries"]
-            st.session_state.pop("uploaded_errors", None)
-            st.rerun()
-
+            st.dataframe(reader, use_container_width=True, hide_index=True)
+            if st.button("확인 후 반영"):
+                _apply_upload(content)
+                st.cache_data.clear()
+                C.notice("ok", f"{len(res.entries)}건이 반영되었습니다.", "백업이 생성되었습니다.")
     C.footer()
 
 
-# ═══════════════════════ Phase 2에서 구현될 신규 페이지 (현재는 준비 중) ═══════
-def _placeholder(category: str, title: str, desc: str):
-    C.page_header_bc(category, title, desc)
-    C.empty_state_svg(
-        ILL.empty_waiting(), "준비 중입니다.",
-        "이 페이지는 다음 단계(Phase 2)에서 제공됩니다. "
-        "데이터가 없는 기능은 대기/잠금으로 표시됩니다.",
-    )
-    C.footer()
+def _apply_upload(content: str):
+    """백업 후 원자적 쓰기 (임시 파일 → 교체)."""
+    import tempfile
+    import shutil
+    from datetime import datetime, timezone
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    if os.path.exists(ENERGIES_CSV):
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        shutil.copy2(ENERGIES_CSV, os.path.join(BACKUP_DIR, f"energies.csv.{ts}.bak"))
+    d = os.path.dirname(ENERGIES_CSV)
+    fd, tmp = tempfile.mkstemp(dir=d, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+            f.write(content)
+        os.replace(tmp, ENERGIES_CSV)
+    except Exception:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
 
 
-def page_surface_compare():
-    C.page_header_bc("분석", "표면 비교",
-                     "표면 2~4개와 가스를 골라 흡착 에너지를 나란히 비교합니다.")
-    surf_list = registry.surfaces(entries)
-    if not surf_list:
-        C.empty_state_svg(ILL.empty_chart(), "표면 데이터가 없습니다.",
-                          "데이터 레지스트리에서 추가하세요.")
-        C.footer()
-        return
+# ═══════════════════════ 모델 정보 ═══════════════════════
+def page_model():
+    C.breadcrumb("모델", "모델 정보")
+    C.page_header("모델 정보", "타깃별 학습 데이터와 LOOCV 성능을 표시합니다.")
+    C.scope_banner()
 
-    c1, c2 = st.columns([2, 1])
-    picked = c1.multiselect("표면 선택 (2~4개)", surf_list,
-                            default=surf_list[:min(4, len(surf_list))], max_selections=4)
-    gas = c2.selectbox("가스", GASES, format_func=lambda g: T.gas_meta(g)["label"])
-
-    if len(picked) < 2:
-        C.notice("info", "표면을 2개 이상 선택하세요.")
-        C.footer()
-        return
-
-    # 각 표면 E_ad 계산 (불가 시 사유)
-    results = []
-    for s in picked:
-        r = registry.compute_ad_for(entries, s, gas)
-        results.append({"surface": s, "r": r})
-
-    ok_rows = [{"surface": x["surface"], "e_ad_ev": x["r"].E_ad_eV}
-               for x in results if x["r"].ok]
-
-    # 막대 (계산된 것만)
-    C.section_head(ILL.icon_metrics(), f"흡착 에너지 — {T.gas_meta(gas)['label']}")
-    if ok_rows:
-        st.plotly_chart(charts.surface_compare_bar(ok_rows, gas), use_container_width=True)
-    else:
-        C.notice("pending", "선택한 표면 중 계산 가능한 E_ad가 없습니다.")
-
-    # 표 (빈칸 + 사유 pill)
-    rows_html = ""
-    for x in results:
-        s, r = x["surface"], x["r"]
-        if r.ok:
-            label, kind = C.adsorption_interpretation(r.E_ad_eV)
-            cell = (f'<span class="mono" style="color:{T.PRIMARY}">{r.E_ad_eV:.3f} eV</span> '
-                    f'<span class="mono hint">({r.E_ad_Ry:.5f} Ry)</span> '
-                    f'{C.status_pill(kind, label)}')
+    import hashlib
+    label_map = {"Eads_CO2": "Eads(CO₂)", "Eads_H2O": "Eads(H₂O)",
+                 "Eads_SO2": "Eads(SO₂)", "Delta_d": "Δd"}
+    for t in G.TARGETS:
+        pts = S.training_points(entries, comp_map, t)
+        C.section_title(f"{label_map[t]} — 학습 데이터 {len(pts)}/{settings.min_train_points}")
+        st.markdown(C.progress_bar(len(pts), settings.min_train_points), unsafe_allow_html=True)
+        q = G.loocv(pts, t, settings.min_train_points)
+        if q.ok:
+            cc = st.columns(2)
+            cc[0].markdown(C.kpi_card("MAE", f"{q.mae:.4f}", "eV"), unsafe_allow_html=True)
+            cc[1].markdown(C.kpi_card("RMSE", f"{q.rmse:.4f}", "eV"), unsafe_allow_html=True)
         else:
-            cell = f'{C.status_pill("pending", "계산 불가")} <span class="hint">{r.reason}</span>'
-        rows_html += (f'<div style="display:flex;gap:10px;padding:8px 0;'
-                      f'border-bottom:1px solid {T.BORDER}"><b style="min-width:120px">{s}</b>'
-                      f'<span>{cell}</span></div>')
-    C.card(rows_html)
+            C.empty_state("📈", "LOOCV 데이터 부족", q.reason)
 
-    # CSV / PNG 다운로드
-    df = pd.DataFrame([{
-        "surface": x["surface"], "gas": gas,
-        "E_ad_eV": (round(x["r"].E_ad_eV, 4) if x["r"].ok else ""),
-        "E_ad_Ry": (round(x["r"].E_ad_Ry, 8) if x["r"].ok else ""),
-        "status": ("ok" if x["r"].ok else "pending"),
-        "reason": ("" if x["r"].ok else x["r"].reason),
-        "calc_group": (x["r"].calc_group if x["r"].ok else ""),
-    } for x in results])
-    dc1, dc2 = st.columns(2)
-    dc1.download_button("비교 표 CSV 다운로드", data=df_to_csv_bytes(df),
-                        file_name="surface_compare.csv", mime="text/csv")
-    if ok_rows:
-        try:
-            png = fig_to_png_bytes(charts.surface_compare_bar(ok_rows, gas, png=True))
-            dc2.download_button("비교 차트 PNG 다운로드", data=png,
-                                file_name="surface_compare.png", mime="image/png")
-        except Exception:
-            dc2.caption("PNG 내보내기를 사용할 수 없습니다.")
+    st.caption(G.SIGMA_NOTE)
+    C.card('<div class="hint">혼합 표면은 조성당 대표 배열 1개로 고정합니다.</div>')
+
+    # 데이터 파일 SHA-256
+    def sha(path):
+        if not os.path.exists(path):
+            return "—"
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for ch in iter(lambda: f.read(8192), b""):
+                h.update(ch)
+        return h.hexdigest()
+    C.card(f'<div class="kpi-label">데이터 버전 (SHA-256)</div>'
+           f'<div class="mono" style="font-size:11px;word-break:break-all;margin-top:4px">'
+           f'energies.csv · {sha(ENERGIES_CSV)}</div>')
     C.footer()
 
 
-def page_competitive():
-    C.page_header_bc("분석", "경쟁 흡착 비교",
-                     "표면별 CO₂/H₂O/SO₂ 흡착과 선택성을 함께 비교합니다.")
-    surf_list = registry.surfaces(entries)
-    if not surf_list:
-        C.empty_state_svg(ILL.empty_chart(), "표면 데이터가 없습니다.",
-                          "데이터 레지스트리에서 추가하세요.")
-        C.footer()
-        return
+# ═══════════════════════ 내보내기 ═══════════════════════
+def page_export():
+    C.breadcrumb("자료", "내보내기")
+    C.page_header("내보내기", "결과 표 CSV와 인쇄용 HTML을 생성합니다.")
+    C.scope_banner()
 
-    # 표면별 가스별 E_ad
-    by_surface = {}
-    for s in surf_list:
-        by_surface[s] = {}
+    # E_ads 표
+    rows = []
+    for s in S.surfaces(entries):
         for g in GASES:
-            r = registry.compute_ad_for(entries, s, g)
+            r = S.compute_ad_for(entries, s, g)
             if r.ok:
-                by_surface[s][g] = r.E_ad_eV
-
-    C.section_head(ILL.icon_metrics(), "가스별 흡착 에너지")
-    if any(by_surface[s] for s in surf_list):
-        st.plotly_chart(charts.competitive_bar(by_surface), use_container_width=True)
-        try:
-            png = fig_to_png_bytes(charts.competitive_bar(by_surface, png=True))
-            st.download_button("경쟁 흡착 PNG 다운로드", data=png,
-                               file_name="competitive.png", mime="image/png")
-        except Exception:
-            st.caption("PNG 내보내기를 사용할 수 없습니다.")
+                rows.append({"surface": s, "gas": g,
+                             "E_ads_eV": round(r.E_ad_eV, 3),
+                             "E_ads_Ry": round(r.E_ad_Ry, 5),
+                             "calc_group": r.calc_group,
+                             "source_file": r.components["E_adsorbed"]["source_file"]})
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.download_button("결과 표 CSV 다운로드",
+                           data=df.to_csv(index=False).encode("utf-8-sig"),
+                           file_name="eads_results.csv", mime="text/csv")
     else:
-        C.notice("pending", "계산 가능한 E_ad가 아직 없습니다.")
+        C.empty_state("📄", "계산된 E_ads가 없습니다.")
 
-    # 선택성 지표 (세 가스 모두 있을 때만)
-    C.section_head(ILL.icon_gpr(), "선택성 지표")
-    sel_html = ""
-    for s in surf_list:
-        e_co2 = registry.compute_ad_for(entries, s, "CO2")
-        e_h2o = registry.compute_ad_for(entries, s, "H2O")
-        e_so2 = registry.compute_ad_for(entries, s, "SO2")
-        p_h2o = selectivity_P("P(CO2/H2O)", e_h2o, e_co2, "H2O")
-        p_so2 = selectivity_P("P(CO2/SO2)", e_so2, e_co2, "SO2")
-
-        def cell(p):
-            if p.ok:
-                return f'<span class="mono" style="color:{T.PRIMARY}">{p.value_eV:.3f} eV</span>'
-            return f'{C.status_pill("pending", "pending")} <span class="hint">{p.reason}</span>'
-        sel_html += (f'<div style="padding:8px 0;border-bottom:1px solid {T.BORDER}">'
-                     f'<b>{s}</b><br>'
-                     f'<span class="hint">P(CO₂/H₂O):</span> {cell(p_h2o)} &nbsp; '
-                     f'<span class="hint">P(CO₂/SO₂):</span> {cell(p_so2)}</div>')
-    C.card(sel_html)
-
-    # 계산 커버리지 매트릭스 (표면 × 가스)
-    C.section_head(ILL.icon_dft(), "계산 커버리지 매트릭스")
-    header = ('<tr><th style="text-align:left;padding:6px 10px">표면</th>'
-              + "".join(f'<th style="padding:6px 10px">{T.gas_meta(g)["label"]}</th>'
-                        for g in GASES) + "</tr>")
-    body = ""
-    for s in surf_list:
-        cells = f'<td style="padding:6px 10px"><b>{s}</b></td>'
-        for g in GASES:
-            r = registry.compute_ad_for(entries, s, g)
-            pill = (C.status_pill("ok", "계산됨") if r.ok
-                    else C.status_pill("pending", "대기"))
-            cells += f'<td style="padding:6px 10px;text-align:center">{pill}</td>'
-        body += f"<tr>{cells}</tr>"
-    C.render_html(st, f'<div class="card"><table style="width:100%;border-collapse:collapse;font-size:13px">'
-        f'{header}{body}</table></div>')
-    C.footer()
-
-
-def page_flue_gas():
-    C.page_header_bc("설계", "배가스 조건 설정",
-                     "시나리오 메모와 역방향 추천 정렬용 우선순위를 설정합니다.")
-
-    C.notice("info", "현재 계산(0 K, 진공 DFT)에는 반영되지 않는 시나리오 메모입니다.",
-             "입력값은 물리 모델에 들어가지 않으며, 리포트에 기록되고 추천 정렬에만 쓰입니다.")
-
-    cond = st.session_state.get("flue_gas", {})
-    C.section_head(ILL.icon_metrics(), "배가스 조성·조건 (메모)")
-    c1, c2, c3 = st.columns(3)
-    co2 = c1.number_input("CO₂ (vol%)", min_value=0.0, max_value=100.0,
-                          value=float(cond.get("co2", 0.0)), step=0.1)
-    h2o = c2.number_input("H₂O (vol%)", min_value=0.0, max_value=100.0,
-                          value=float(cond.get("h2o", 0.0)), step=0.1)
-    so2 = c3.number_input("SO₂ (vol%)", min_value=0.0, max_value=100.0,
-                          value=float(cond.get("so2", 0.0)), step=0.1)
-    temp = st.number_input("온도 (°C)", value=float(cond.get("temp", 0.0)), step=1.0)
-    memo = st.text_area("메모", value=cond.get("memo", ""),
-                        placeholder="예: 석탄화력 배가스 가정 등 (업종 프리셋 수치는 제공하지 않습니다)")
-
-    st.session_state["flue_gas"] = {
-        "co2": co2, "h2o": h2o, "so2": so2, "temp": temp, "memo": memo,
-    }
-
-    # 사용자 우선순위 슬라이더
-    C.section_head(ILL.icon_gpr(), "사용자 우선순위 (추천 정렬에만 사용)")
-    st.caption("사용자 지정 우선순위이며 물리 모델이 아닙니다. 역방향 추천 후보 정렬에만 반영됩니다.")
-    pr = st.session_state.get("priority", {})
-    pc1, pc2, pc3 = st.columns(3)
-    w_h2o = pc1.slider("H₂O 대비 선택성", 0.0, 1.0, float(pr.get("w_h2o", 0.5)), 0.05)
-    w_so2 = pc2.slider("SO₂ 대비 선택성", 0.0, 1.0, float(pr.get("w_so2", 0.5)), 0.05)
-    w_dd = pc3.slider("표면 변형 최소화", 0.0, 1.0, float(pr.get("w_dd", 0.5)), 0.05)
-    st.session_state["priority"] = {"w_h2o": w_h2o, "w_so2": w_so2, "w_dd": w_dd}
-
-    C.notice("ok", "저장되었습니다.", "이 설정은 리포트 내보내기와 역방향 추천 정렬에 사용됩니다.")
-    C.footer()
-
-
-def page_out_inspector():
-    C.page_header_bc("데이터", ".out 파일 검사기",
-                     "Quantum ESPRESSO 출력 파일을 파싱하고 CSV 값과 대조합니다.")
-    C.notice("info", "파싱 실패 항목은 값을 추정하지 않고 사유를 표시합니다.",
-             "energies.csv 반영은 미리보기 후 확인 버튼을 눌러야 하며, 백업과 감사 로그가 남습니다.")
-
-    ups = st.file_uploader("QE .out 파일 업로드 (다중 가능)", type=["out", "txt"],
-                           accept_multiple_files=True)
-    if not ups:
-        C.empty_state_svg(ILL.empty_waiting(), ".out 파일을 업로드하세요.",
-                          "최종 total energy·수렴·JOB DONE·계산 조건·pseudo를 파싱합니다.")
-        C.footer()
-        return
-
-    by_source = {e.source_file: e for e in entries}
-    candidates = []  # 반영 후보 (현재 CSV에 없는 source_file)
-
-    for up in ups:
-        try:
-            text = up.read().decode("utf-8", errors="replace")
-        except Exception as ex:
-            C.notice("suspect", f"{up.name} 읽기 실패", str(ex))
-            continue
-        r = qe_parser.parse_out_text(text)
-
-        C.section_head(ILL.icon_dft(), up.name)
-        # 파싱 결과 표
-        prows = [
-            ("total energy (Ry)", r.total_energy_8dp or "— (파싱 실패)"),
-            ("수렴(converged)", {True: "예", False: "아니오", None: "— (없음)"}[r.converged]),
-            ("JOB DONE", "예" if r.job_done else "아니오"),
-            ("atoms/cell", r.n_atoms if r.n_atoms is not None else "—"),
-            ("ecutwfc (Ry)", r.ecutwfc if r.ecutwfc is not None else "—"),
-            ("ecutrho (Ry)", r.ecutrho if r.ecutrho is not None else "—"),
-            ("k points", r.kpoints or "—"),
-            ("nspin", r.nspin if r.nspin is not None else "—"),
-            ("vdW", r.vdw or "—"),
-            ("pseudos", ", ".join(r.pseudos) if r.pseudos else "—"),
-        ]
-        st.dataframe(pd.DataFrame(prows, columns=["항목", "값"]),
-                     width='stretch', hide_index=True)
-
-        if r.errors:
-            C.notice("pending", "파싱 경고/실패", " · ".join(r.errors))
-
-        # CSV source_file 대조 (Ti2C_FH 등 검증)
-        if up.name in by_source:
-            e = by_source[up.name]
-            cmp = qe_parser.compare_to_csv_energy(r, e.energy_Ry)
-            if cmp["match"] is True:
-                C.notice("ok", f"CSV 값과 일치 ({e.key})",
-                         f"CSV: {e.energy_Ry:.8f} Ry · 파일: {r.total_energy_8dp} Ry")
-            elif cmp["match"] is False:
-                C.notice("suspect", f"CSV 값과 불일치 ({e.key})",
-                         f"CSV: {e.energy_Ry:.8f} Ry · 파일: {r.total_energy_8dp} Ry · {cmp['reason']}")
-            else:
-                C.notice("pending", f"대조 불가 ({e.key})", cmp["reason"])
-        else:
-            # CSV에 없는 새 파일 → 행 후보
-            if r.total_energy_Ry is not None:
-                candidates.append({"source_file": up.name, "parsed": r})
-            else:
-                C.notice("pending", "행 후보 생성 불가",
-                         "에너지를 파싱하지 못해 energies.csv 후보를 만들 수 없습니다.")
-
-    # ── energies.csv 행 후보 생성 → 미리보기 → 확인 ──
-    if candidates:
-        C.section_head(ILL.icon_metrics(), "energies.csv 행 후보")
-        st.caption("아래는 현재 CSV에 없는 파일에서 생성한 후보입니다. 확인 전에는 반영되지 않습니다.")
-        prev_rows = []
-        for c in candidates:
-            r = c["parsed"]
-            prev_rows.append({
-                "key": f"NEW/{c['source_file']}", "role": "", "surface": "", "gas": "",
-                "energy_Ry": r.total_energy_8dp, "source_file": c["source_file"],
-                "calc_group": "", "status": "pending",
-                "n_atoms": r.n_atoms or "", "ecutwfc": r.ecutwfc or "",
-                "ecutrho": r.ecutrho or "", "kpoints": r.kpoints or "",
-                "nspin": r.nspin or "", "vdw": r.vdw or "",
-            })
-        st.dataframe(pd.DataFrame(prev_rows), width='stretch', hide_index=True)
-        st.caption("role/surface/gas/calc_group은 비어 있습니다. 반영 후 데이터 레지스트리에서 "
-                   "보완하세요. (가상 값으로 채우지 않습니다.)")
-        if st.button("확인 후 energies.csv에 추가", type="primary"):
-            try:
-                # 1) 백업
-                DF.backup_file(ENERGIES_CSV, BACKUP_DIR)
-                # 2) 기존 내용 + 새 행 (기존 값 불변, append만)
-                with open(ENERGIES_CSV, encoding="utf-8") as f:
-                    existing = f.read()
-                lines = [existing.rstrip("\n")]
-                for c in candidates:
-                    r = c["parsed"]
-                    # 기본 8컬럼만 append (선택 컬럼은 레지스트리에서 보완)
-                    lines.append(f"NEW/{c['source_file']},,,,"
-                                 f"{r.total_energy_8dp},{c['source_file']},,pending")
-                    DF.append_audit(AUDIT_CSV, "add_candidate",
-                                    f"NEW/{c['source_file']}", "", r.total_energy_8dp or "",
-                                    c["source_file"])
-                # 3) 원자적 쓰기
-                DF.atomic_write(ENERGIES_CSV, "\n".join(lines) + "\n")
-                st.cache_data.clear()  # 파일 변경 → 캐시 무효화
-                C.notice("ok", f"{len(candidates)}건이 추가되었습니다.",
-                         "백업과 감사 로그가 기록되었습니다. 새로고침 후 레지스트리에서 확인하세요.")
-            except Exception as ex:
-                C.notice("suspect", "반영 실패 — 변경이 롤백되었습니다.", str(ex))
-
-    C.footer()
-
-
-def page_jobs():
-    C.page_header_bc("데이터", "계산 작업 관리",
-                     "계산 작업 목록과 진행 현황을 관리합니다 (보고서 4.1절 34건 계획 기준).")
-
-    # jobs.csv 로드 (없으면 초기 생성), energies와 동기화
-    if os.path.exists(JOBS_CSV):
-        jobs = pd.read_csv(JOBS_CSV, dtype=str, keep_default_na=False).to_dict("records")
-    else:
-        jobs = JOBS.build_initial_jobs()
-    jobs = JOBS.sync_with_energies(jobs, entries)
-
-    summary = JOBS.progress_summary(jobs)
-    est = JOBS.estimate_remaining(jobs)
-
-    # 진행 현황 KPI
-    C.section_head(ILL.icon_metrics(), "진행 현황")
-    c1, c2, c3, c4 = st.columns(4)
-    C.render_html(c1, C.kpi_equal("완료", f'<div class="kpi-value">{summary["done"]}'
-                            f'<span class="kpi-unit">/ {summary["total"]}</span></div>'))
-    C.render_html(c2, C.kpi_equal("대기(todo)", f'<div class="kpi-value">{summary["todo"]}</div>'))
-    C.render_html(c3, C.kpi_equal("실행/실패",
-                f'<div class="kpi-value">{summary["running"]}/{summary["failed"]}</div>'))
-    eta_txt = ("측정 필요" if est["eta_h"] is None else f'{est["eta_h"]:.1f} h')
-    C.render_html(c4, C.kpi_equal("예상 잔여 시간",
-                f'<div class="kpi-value" style="font-size:22px">{eta_txt}</div>'
-                '<div class="hint" style="margin-top:6px">입력된 wall_time 평균 × 남은 건수</div>'))
-    if est["eta_h"] is None:
-        st.caption("wall_time_h가 입력된 작업이 없어 예상 시간을 계산할 수 없습니다 (가상 수치 없음).")
-
-    # 편집 가능한 작업 표
-    C.section_head(ILL.icon_dft(), "작업 목록 (편집·행 추가 가능)")
-    df = pd.DataFrame(jobs, columns=JOBS.JOB_COLUMNS)
-    edited = st.data_editor(
-        df, width='stretch', num_rows="dynamic", hide_index=True,
-        column_config={
-            "status": st.column_config.SelectboxColumn(
-                "status", options=sorted(JOBS.VALID_JOB_STATUS)),
-        },
-        key="jobs_editor",
-    )
-    cc1, cc2 = st.columns(2)
-    if cc1.button("작업 목록 저장 (jobs.csv)", type="primary"):
-        try:
-            DF.backup_file(JOBS_CSV, BACKUP_DIR)
-            DF.atomic_write(JOBS_CSV, edited.to_csv(index=False))
-            C.notice("ok", "저장되었습니다.", "jobs.csv에 원자적으로 기록되었습니다.")
-        except Exception as ex:
-            C.notice("suspect", "저장 실패 — 롤백되었습니다.", str(ex))
-    cc2.download_button("작업 목록 CSV 다운로드",
-                        data=df_to_csv_bytes(edited), file_name="jobs.csv", mime="text/csv")
-    C.footer()
-
-
-def page_integrity():
-    C.page_header_bc("데이터", "무결성 점검",
-                     "자동 검사 결과와 데이터 스냅샷 해시로 재현성을 확인합니다.")
-
-    checks = INTEG.run_all(entries)
-    n_fail = sum(1 for c in checks if c.status == "fail")
-    n_warn = sum(1 for c in checks if c.status == "warn")
-
-    # 요약
-    if n_fail:
-        C.notice("suspect", f"실패 {n_fail}건 · 경고 {n_warn}건", "아래 항목을 확인하세요.")
-    elif n_warn:
-        C.notice("pending", f"경고 {n_warn}건", "데이터 보완이 필요한 항목이 있습니다.")
-    else:
-        C.notice("ok", "모든 검사 통과", "현재 데이터에서 발견된 무결성 문제가 없습니다.")
-
-    # 검사 목록
-    C.section_head(ILL.icon_dft(), "자동 검사")
-    rows_html = ""
-    for c in checks:
-        pill = {"pass": C.status_pill("ok", "통과"),
-                "warn": C.status_pill("pending", "경고"),
-                "fail": C.status_pill("suspect", "실패")}[c.status]
-        rows_html += (f'<div style="display:flex;gap:10px;padding:8px 0;'
-                      f'border-bottom:1px solid {T.BORDER}">{pill}'
-                      f'<span><b>{c.name}</b> — <span class="hint">{c.detail}</span></span></div>')
-    C.card(rows_html)
-
-    # 데이터 스냅샷 해시 (재현성)
-    C.section_head(ILL.icon_metrics(), "데이터 스냅샷")
-    h = DF.sha256_file(ENERGIES_CSV)
-    C.render_html(st, f'<div class="card"><div class="kpi-label">energies.csv SHA-256</div>'
-        f'<div class="mono" style="font-size:12px;word-break:break-all;margin-top:4px">{h}</div>'
-        '<div class="hint" style="margin-top:6px">이 해시로 데이터 스냅샷의 재현성을 '
-        '확인할 수 있습니다.</div></div>')
-    C.footer()
-
-
-def page_roadmap():
-    C.page_header_bc("모델", "잠금 해제 로드맵",
-                     "각 지표 모델 활성화(유효 표면 7개)에 가장 가까운 다음 계산을 안내합니다.")
-    C.render_html(st, f'<div class="card card-tight"><div class="kpi-label">정렬 규칙</div>'
-        f'<div class="hint" style="margin-top:4px;line-height:1.6">{ROADMAP.RULE_TEXT}</div></div>')
-
-    ov = ROADMAP.roadmap_overview(entries, comp_map, METRIC_LABEL,
-                                  need=gpr.MIN_TRAINING, geom_map=geom_map)
-    for row in ov:
-        C.section_head(ILL.icon_gpr(),
-                       f'{row["label"]} — 현재 {row["current"]}/{row["need"]}')
-        C.render_html(st, C.progress_bar(row["current"], row["need"]))
-        items = row["items"]
-        if not items:
-            C.notice("ok", "추가 계산 없이 활성화 가능하거나 이미 충분합니다.")
-            continue
-        # 가장 가까운 순으로 상위 노출
-        rows_html = ""
-        for it in items[:8]:
-            closeness = ("곧 해금" if it.missing_count <= 1 else "")
-            tag = (C.status_pill("info", closeness) if closeness else "")
-            rows_html += (f'<div style="display:flex;gap:10px;padding:8px 0;'
-                          f'border-bottom:1px solid {T.BORDER}">'
-                          f'<b style="min-width:150px">{it.surface}</b>'
-                          f'<span class="hint">부족 {it.missing_count}건: {it.missing_detail}</span>'
-                          f'&nbsp;{tag}</div>')
-        C.card(rows_html)
-    C.footer()
-
-
-def page_methods():
-    C.page_header_bc("자료", "방법론", "수식·계산 조건·설계·한계를 설명합니다.")
-
-    C.section_head(ILL.icon_metrics(), "지표 정의")
-    st.latex(r"E_{ads} = E_{adsorbed} - (E_{clean} + E_{molecule})")
-    st.latex(r"P(\mathrm{CO_2/H_2O}) = E_{ads}(\mathrm{H_2O}) - E_{ads}(\mathrm{CO_2})")
-    st.latex(r"P(\mathrm{CO_2/SO_2}) = E_{ads}(\mathrm{SO_2}) - E_{ads}(\mathrm{CO_2})")
-    st.latex(r"\Delta d_{surface} = \left| \overline{z}_{after} - \overline{z}_{before} \right|")
-    st.caption("1 Ry = 13.6057 eV. 서로 다른 calc_group의 값은 섞어서 계산하지 않습니다.")
-
-    C.section_head(ILL.icon_gpr(), "GPR / RBF 커널")
-    st.latex(r"k(\mathbf{x}, \mathbf{x}') = "
-             r"\sigma_f^2 \exp\!\left(-\frac{\lVert \mathbf{x}-\mathbf{x}'\rVert^2}{2\ell^2}\right)"
-             r" + \sigma_n^2 \delta_{\mathbf{x},\mathbf{x}'}")
-    st.caption("입력은 조성 벡터 [xO, xF, xOH], 커널은 RBF + WhiteKernel.")
-
-    C.section_head(ILL.icon_dft(), "계산 조건 (보고서 계획값)")
-    C.notice("pending", "아래는 보고서 계획값이며 실제 .out 값과 대조가 필요합니다.",
-             "실제 출력은 '.out 파일 검사기'에서 파싱해 확인하세요.")
-    C.render_html(st, '<div class="card"><div class="hint" style="line-height:1.9">'
-        '· 소프트웨어: Quantum ESPRESSO v7.2<br>'
-        '· 범함수 / 분산보정: PBE-D3<br>'
-        '· ecutwfc / ecutrho: 보고서 계획값 (대조 필요)<br>'
-        '· k-mesh: 3×3×1<br>'
-        '· 슈퍼셀: 2×2<br>'
-        '· 진공: 20 Å</div></div>')
-
-    C.section_head(ILL.icon_al(), "조성 설계와 한계")
-    C.render_html(st, '<div class="card"><div class="hint" style="line-height:1.8">'
-        '· 7개 조성 설계: Scheffé 단체격자(simplex-lattice) + 중심점 구성<br>'
-        '· 한계: N=7 수준에서 GPR 하이퍼파라미터가 불안정할 수 있으며, '
-        'σ는 보정된 불확실성이 아니라 참고용 상대 지표입니다.</div></div>')
-
-    with st.expander("참고문헌 (보고서 수록 6건)"):
-        st.caption("참고문헌은 보고서에 수록된 항목만 표시합니다. 플랫폼에서 임의로 생성하지 않습니다.")
-    C.footer()
-
-
-def page_glossary():
-    C.page_header_bc("자료", "용어집", "플랫폼에서 쓰는 용어를 검색합니다.")
-    q = st.text_input("용어 검색", "", placeholder="예: E_ads, GPR, calc_group")
-    terms = glossary.GLOSSARY
-    shown = 0
-    for term, desc in terms.items():
-        if q and q.lower() not in term.lower() and q.lower() not in desc.lower():
-            continue
-        C.render_html(st, f'<div class="card card-tight"><b style="color:{T.PRIMARY}">{term}</b>'
-            f'<div class="hint" style="margin-top:4px;line-height:1.6">{desc}</div></div>')
-        shown += 1
-    if shown == 0:
-        C.empty_state_svg(ILL.empty_waiting(), "검색 결과가 없습니다.", "다른 용어로 검색해 보세요.")
-    C.footer()
-
-
-def page_report():
-    C.page_header_bc("자료", "리포트 내보내기",
-                     "데이터 스냅샷 해시를 포함한 HTML/Markdown 리포트와 CSV 번들을 생성합니다.")
-
-    from core import report as RP
-    import zipfile, io as _io
-
-    ead = computed_ead_rows()
-    pending = [{"scope": m.scope, "detail": m.detail}
-               for m in registry.missing_checklist(entries)]
-    flue = st.session_state.get("flue_gas", {})
-    d = RP.build_report_data(entries, ead, pending, flue, ENERGIES_CSV)
-
-    # 미리보기 요약
-    C.section_head(ILL.value_icon_source(), "리포트 요약")
-    C.render_html(st, f'<div class="card"><div class="hint" style="line-height:1.8">'
-        f'· 생성 시각(UTC): <span class="mono">{d["generated_at"]}</span><br>'
-        f'· 데이터 스냅샷 SHA-256: <span class="mono" style="font-size:11px">'
-        f'{d["snapshot_sha256"]}</span><br>'
-        f'· 에너지 항목 {len(d["energies"])}건 · 계산된 E_ad {len(ead)}건 · '
-        f'pending {len(pending)}건</div></div>')
-
-    md = RP.to_markdown(d)
-    html_doc = RP.to_html(d)
-
-    c1, c2, c3 = st.columns(3)
-    c1.download_button("HTML 리포트 다운로드", data=html_doc.encode("utf-8"),
+    html_doc = _build_html_report(df)
+    st.download_button("인쇄용 HTML 다운로드", data=html_doc.encode("utf-8"),
                        file_name="ti2c_report.html", mime="text/html")
-    c2.download_button("Markdown 리포트 다운로드", data=md.encode("utf-8"),
-                       file_name="ti2c_report.md", mime="text/markdown")
-    # CSV 번들 (zip): energies.csv + jobs.csv(있으면) + 리포트
-    buf = _io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        with open(ENERGIES_CSV, encoding="utf-8") as f:
-            z.writestr("energies.csv", f.read())
-        if os.path.exists(JOBS_CSV):
-            with open(JOBS_CSV, encoding="utf-8") as f:
-                z.writestr("jobs.csv", f.read())
-        z.writestr("report.md", md)
-        z.writestr("report.html", html_doc)
-    c3.download_button("CSV 번들(zip) 다운로드", data=buf.getvalue(),
-                       file_name="ti2c_bundle.zip", mime="application/zip")
-
-    with st.expander("Markdown 미리보기"):
-        st.code(md, language="markdown")
     C.footer()
 
 
-def page_about():
-    C.page_header_bc("자료", "팀·프로젝트 소개", "RE:ACT와 프로젝트 목표를 소개합니다.")
+def _build_html_report(df) -> str:
+    import html as _h
+    from datetime import datetime, timezone
+    rows_html = ""
+    if not df.empty:
+        for _, r in df.iterrows():
+            rows_html += (f"<tr><td>{_h.escape(str(r['surface']))}</td>"
+                          f"<td>{_h.escape(str(r['gas']))}</td>"
+                          f"<td>{r['E_ads_eV']}</td><td>{r['E_ads_Ry']}</td>"
+                          f"<td>{_h.escape(str(r['calc_group']))}</td>"
+                          f"<td>{_h.escape(str(r['source_file']))}</td></tr>")
+    else:
+        rows_html = '<tr><td colspan="6">데이터 없음</td></tr>'
+    return f"""<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
+<title>Ti2C MXene 리포트</title><style>
+body{{font-family:system-ui,sans-serif;max-width:900px;margin:24px auto;padding:0 16px;color:#334155}}
+table{{border-collapse:collapse;width:100%;font-size:12px;margin-top:8px}}
+th,td{{border:1px solid #E7E5E4;padding:4px 8px;text-align:left}}
+.scope{{background:#ECFDF5;border-left:4px solid #0F766E;padding:12px;font-size:13px}}
+@media print{{body{{margin:0}}}}
+</style></head><body>
+<h1>배가스 맞춤형 Ti₂C MXene 표면 설계 플랫폼 — 리포트</h1>
+<p>생성(UTC): {datetime.now(timezone.utc).isoformat()}</p>
+<div class="scope"><b>적용 범위</b> — {_h.escape(APPLICABILITY)}</div>
+<h2>지표 정의</h2>
+<ul><li>E_ads = E_complex − (E_surface + E_gas)</li>
+<li>P(CO₂/H₂O) = E_ads(H₂O) − E_ads(CO₂)</li>
+<li>P(CO₂/SO₂) = E_ads(SO₂) − E_ads(CO₂) (참고용)</li>
+<li>Δd = |(z_T−z_ref)_after − (z_T−z_ref)_before| (SO₂ 한정)</li>
+<li>1 Ry = {RY_TO_EV} eV</li></ul>
+<h2>조건 보정 δ 가정</h2>
+<p>T=298.15 K, S°(J/mol·K): CO₂ 213.8 / H₂O 188.8 / SO₂ 248.2, kT=0.02569 eV. 온도·분압 1차 근사.</p>
+<h2>분류 설정값</h2>
+<p>kappa={_settings_str()}</p>
+<h2>계산된 E_ads</h2>
+<table><tr><th>표면</th><th>가스</th><th>E_ads(eV)</th><th>E_ads(Ry)</th>
+<th>calc_group</th><th>source_file</th></tr>{rows_html}</table>
+<h2>데이터 없음</h2>
+<p>H₂O 관련 항목과 P 지수는 현재 데이터 없음. Δd(geometry) 데이터 없음.</p>
+</body></html>"""
 
-    C.render_html(st, f'<div class="card"><div style="display:flex;align-items:center;gap:10px">'
-        f'{ILL.composition_triangle(size=30)}'
-        f'<span style="font-size:20px">{B.wordmark(on_dark=False, size=22)}</span></div>'
-        f'<div class="hint" style="margin-top:8px;line-height:1.7">'
-        f'{B.SCHOOL} · {B.DEPT}<br>{B.EVENT}</div></div>')
 
-    C.section_head(ILL.icon_al(), "프로젝트 목표와 가설")
-    C.render_html(st, '<div class="card"><div class="hint" style="line-height:1.8">'
-        '· 목표: Ti₂C MXene 표면 말단기(-O/-F/-OH) 조성에 따른 CO₂·H₂O·SO₂ 흡착 거동을 '
-        'DFT로 산출하고, Active Learning으로 CO₂ 선택 포집에 유망한 조성을 탐색한다.<br>'
-        '· 가설: 말단기 조성이 가스별 흡착 선택성과 표면 변형(Δd)에 영향을 미치며, '
-        '조성 공간 탐색으로 선택성이 유리한 영역을 식별할 수 있다. (보고서 1.3절 기준)'
-        '</div></div>')
-
-    # 팀원: MEMBERS가 비어 있으면 섹션 자체를 숨김
-    if B.has_members():
-        C.section_head(ILL.value_icon_source(), "팀원")
-        C.render_html(st, '<div class="card">' + " · ".join(B.MEMBERS) + "</div>")
-    C.footer()
+def _settings_str():
+    s = settings
+    return (f"{s.kappa}, margin_m={s.margin_m_eV} eV, preset={s.preset}, "
+            f"delta_d_max={s.delta_d_max_A}, sigma_max={s.sigma_max_eV}")
 
 
 # ───────────────────────── 라우팅 ─────────────────────────
 PAGES = {
-    "Overview": page_overview,
     "정방향 검증": page_forward,
-    "표면 비교": page_surface_compare,
-    "경쟁 흡착 비교": page_competitive,
-    "배가스 조건 설정": page_flue_gas,
     "역방향 추천": page_reverse,
-    "데이터 레지스트리": page_registry_view,
-    ".out 파일 검사기": page_out_inspector,
-    "계산 작업 관리": page_jobs,
-    "무결성 점검": page_integrity,
-    "모델 품질": page_quality,
-    "잠금 해제 로드맵": page_roadmap,
-    "방법론": page_methods,
-    "용어집": page_glossary,
-    "리포트 내보내기": page_report,
-    "팀·프로젝트 소개": page_about,
+    "조성 지도": page_map,
+    "데이터·QC": page_data_qc,
+    "모델 정보": page_model,
+    "내보내기": page_export,
 }
-PAGES.get(page, page_overview)()
+PAGES.get(page, page_forward)()

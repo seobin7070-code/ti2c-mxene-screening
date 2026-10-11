@@ -1,0 +1,11 @@
+{
+  "kappa": 1.0,
+  "margin_m_eV": 0.10,
+  "delta_d_max_A": null,
+  "sigma_max_eV": null,
+  "preset": "condition_input",
+  "wide_range": { "reject_below_eV": -0.10, "prefer_above_eV": 0.25 },
+  "composition_grid": "quarter",
+  "min_train_points": 7,
+  "min_distance_far_threshold": 4.0
+}

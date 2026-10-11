@@ -18,8 +18,22 @@ EVENT = "2026 UoU 창의적 종합설계 경진대회"
 MEMBERS: list[str] = []  # 비어 있으면 표시하지 않음
 
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
-LOGO_TEAM = os.path.join(ASSETS_DIR, "logo_team.png")
-LOGO_SCHOOL = os.path.join(ASSETS_DIR, "logo_school.png")
+APP_ICON = os.path.join(ASSETS_DIR, "app_icon_512.png")
+LOGO_HORIZONTAL_DARK = os.path.join(ASSETS_DIR, "logo_horizontal_dark.png")
+FAVICON = os.path.join(ASSETS_DIR, "favicon_64.png")
+
+
+def app_icon_path():
+    """시작 화면 로고용. app_icon 또는 logo_horizontal_dark 가 있으면 경로, 없으면 None."""
+    if os.path.exists(APP_ICON):
+        return APP_ICON
+    if os.path.exists(LOGO_HORIZONTAL_DARK):
+        return LOGO_HORIZONTAL_DARK
+    return None
+
+
+def favicon_path():
+    return FAVICON if os.path.exists(FAVICON) else "⬡"
 
 
 def wordmark(on_dark: bool = True, size: int = 20) -> str:

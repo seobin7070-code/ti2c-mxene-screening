@@ -1,12 +1,11 @@
-"""시작 화면 (랜딩).
+"""시작 화면 (랜딩) — PDF [5] 명세.
 
-'플랫폼 시작하기' 클릭 시 st.session_state['entered']=True 로 Overview 진입.
-상태 스트립 수치는 core 함수 결과를 그대로 받는다 (하드코딩 금지).
+'플랫폼 시작하기' 클릭 시 st.session_state['entered']=True 후 정방향 검증 진입.
+'적용 범위 보기'는 입장하지 않고 PDF 1장 적용 범위 문구를 펼쳐 보여준다.
+상태 스트립 수치(흡착 에너지 N건 · GPR 활성 0/4)는 core 결과를 그대로 받는다.
 
-레이아웃: 과거엔 position:fixed 오버레이가 Streamlit 버튼을 가려 CTA가 보이지
-않았다. 이제 landing을 일반 블록으로 렌더하고 CTA(st.button)를 부제 아래·가치 카드
-위의 자연 흐름에 배치한다. 시작 화면 전용 CSS는 body.landing-active 스코프로만 적용해
-다른 페이지 버튼에 영향을 주지 않는다.
+landing 은 일반 블록으로 렌더하고 CTA(st.button)를 자연 흐름에 둔다(오버레이 가림 방지).
+시작 화면 전용 버튼 CSS 는 body.landing-active 스코프로만 적용한다.
 """
 
 from __future__ import annotations
@@ -15,8 +14,8 @@ import streamlit as st
 
 from ui import branding as B
 from ui import illustrations as ILL
-from ui import tokens as T
 from ui.htmlutil import html_block
+from core.scope import APPLICABILITY
 
 
 def _enter(nav: str | None = None) -> None:
@@ -39,18 +38,13 @@ def should_skip_via_query() -> bool:
 
 
 def render(n_ead: int, n_models_active: int, n_models_total: int) -> None:
-    """시작 화면을 렌더한다. 상태 스트립은 전달받은 수치만 표시한다."""
-    # 안전장치: ?enter=1 이면 즉시 입장
+    """시작 화면을 렌더한다."""
     if should_skip_via_query():
         _enter()
         return
 
     tri = ILL.composition_triangle(size=28)
     wm = B.wordmark(on_dark=True, size=22)
-
-    members_html = ""
-    if B.has_members():
-        members_html = ('<div style="margin-top:4px">' + " · ".join(B.MEMBERS) + "</div>")
 
     values = (
         f'<div class="val-item"><span class="val-ic">{ILL.value_icon_water()}</span>'
@@ -61,15 +55,14 @@ def render(n_ead: int, n_models_active: int, n_models_total: int) -> None:
         f'<span class="val-t">적은 계산으로 조성 탐색</span></div>'
     )
 
-    # body 에 landing-active 클래스를 부여해 시작 화면 전용 버튼 CSS 스코프를 연다.
+    # body 에 landing-active 클래스 부여 (버튼 CSS 스코프)
     st.markdown(
-        "<style>:root{} </style>"
         '<div id="landing-flag"></div>'
         "<script>document.body && document.body.classList.add('landing-active');</script>",
         unsafe_allow_html=True,
     )
 
-    # ── 상단 바 + 히어로 (부제까지) ──
+    # ── 상단 바 + 히어로 ──
     st.markdown(
         html_block(f'''
 <div class="landing-wrap">
@@ -98,28 +91,34 @@ def render(n_ead: int, n_models_active: int, n_models_total: int) -> None:
         unsafe_allow_html=True,
     )
 
-    # ── CTA 버튼 (부제 아래, 가치 카드 위) ──
+    # ── CTA 버튼 ──
     st.markdown('<div class="landing-cta-anchor"></div>', unsafe_allow_html=True)
     c1, c2, _sp = st.columns([1.1, 1.1, 2.8])
     if c1.button("플랫폼 시작하기", type="primary", use_container_width=True,
                  key="cta_start"):
         _enter()
-    if c2.button("방법론 먼저 보기", use_container_width=True, key="cta_methods"):
-        _enter("방법론")
+    if c2.button("적용 범위 보기", use_container_width=True, key="cta_scope"):
+        st.session_state["show_scope"] = not st.session_state.get("show_scope", False)
 
-    # ── 가치 카드 3열 + 상태 스트립 + 푸터 ──
+    if st.session_state.get("show_scope"):
+        st.markdown(
+            html_block(f'<div class="landing-wrap landing-wrap-cont">'
+                       f'<div class="landing-inner landing-inner-cont">'
+                       f'<div class="landing-scope">적용 범위 — {APPLICABILITY}</div>'
+                       f'</div></div>'),
+            unsafe_allow_html=True,
+        )
+
+    # ── 가치 카드 + 상태 스트립 + 푸터 ──
     st.markdown(
         html_block(f'''
 <div class="landing-wrap landing-wrap-cont">
   <div class="landing-inner landing-inner-cont">
     <div class="landing-values">{values}</div>
-    <div class="landing-strip">현재 등록된 계산: 흡착 에너지
-      <span class="mono">{n_ead}</span>건 · 지표 모델 활성
+    <div class="landing-strip">등록된 흡착 에너지
+      <span class="mono">{n_ead}</span>건 · GPR 활성 모델
       <span class="mono">{n_models_active}/{n_models_total}</span></div>
-    <div class="landing-foot">
-      {B.SCHOOL} · {B.DEPT} · {B.wordmark(on_dark=True, size=13)}
-      {members_html}
-    </div>
+    <div class="landing-foot">{B.SCHOOL} · {B.DEPT} · {B.wordmark(on_dark=True, size=13)}</div>
   </div>
 </div>
 '''),

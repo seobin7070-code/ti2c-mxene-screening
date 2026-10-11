@@ -1,5 +1,9 @@
-surface,xO,xF,xOH,confirmed
-Ti2CO2,1,0,0,true
-Ti2CF2,0,1,0,true
-Ti2C_OF,0.5,0.5,0,true
-Ti2C_FH,,,,false
+surface,xO,xF,xOH,confirmed,arrangement_note,status
+Ti2CO2,1,0,0,true,순수 O 말단,computed
+Ti2CF2,0,1,0,true,순수 F 말단,computed
+Ti2C_OF,0.5,0.5,0,true,O:F 50:50 대표 배열,computed
+Ti2C_FH,,,,false,조성 미확정(F0.5H0.5 vs F0.5OH0.5 확인 전),planned
+Ti2C_OH,0,0,1,false,순수 OH 말단(계획),planned
+Ti2C_O_OH,0.5,0,0.5,false,O:OH 50:50(계획),planned
+Ti2C_F_OH,0,0.5,0.5,false,F:OH 50:50(계획),planned
+Ti2C_ternary,0.5,0.25,0.25,false,삼원 대표(계획),planned

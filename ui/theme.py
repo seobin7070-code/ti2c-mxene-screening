@@ -48,6 +48,22 @@ html, body, [class*="css"], .stMarkdown, .stApp {{
 }}
 .card-tight {{ padding: 16px 18px; }}
 
+/* ── 적용 범위 배너 (결과 화면 상단 한 곳) ────────────────── */
+.scope-banner {{
+    display:flex; gap:10px; align-items:flex-start;
+    background:{T.TINT}; border:1px solid {T.BORDER}; border-left:4px solid {T.PRIMARY};
+    border-radius:10px; padding:12px 16px; margin-bottom:18px;
+    font-size:13px; line-height:1.6; color:{T.TEXT};
+}}
+.scope-banner .scope-ic {{ color:{T.PRIMARY}; font-size:15px; flex:0 0 auto; }}
+
+/* ── 분류 배지 색 (우선 검토/추가 계산 권장/현재 기준 미충족) ── */
+.cls-priority {{ background:{T.TINT}; color:{T.PRIMARY}; border:1px solid {T.PRIMARY}; }}
+.cls-more {{ background:#FEF3C7; color:#B45309; border:1px solid #D97706; }}
+.cls-unmet {{ background:#FEE2E2; color:#B91C1C; border:1px solid #DC2626; }}
+.cls-badge {{ display:inline-block; padding:4px 14px; border-radius:999px;
+    font-size:14px; font-weight:700; }}
+
 /* ── KPI (숫자가 주인공) ──────────────────────────────────── */
 .kpi-label {{ font-size: 12px; color: {T.TEXT_MUTED}; font-weight: 500; margin-bottom: 6px; }}
 .kpi-value {{ font-size: 32px; font-weight: 700; line-height: 1.1; font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; color: {T.TEXT}; }}
@@ -325,6 +341,9 @@ body.landing-active .block-container {{ padding-top:1.2rem !important; max-width
 .landing-strip .mono {{ color:#5EEAD4; }}
 .landing-foot {{ margin-top:16px; font-size:12px; color:#94A3B8; }}
 .landing-foot .wordmark {{ font-size:13px; }}
+.landing-scope {{ margin-top:12px; padding:14px 16px; border-radius:10px;
+    background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.18);
+    font-size:13px; line-height:1.6; color:#E2E8F0; }}
 
 /* ── 시작 화면 CTA 버튼 (body.landing-active 스코프 → 다른 페이지 영향 없음) ── */
 .landing-cta-anchor {{ margin-top:20px; }}  /* 부제와 버튼 사이 24px 이상 확보 */

@@ -19,6 +19,8 @@ class Composition:
     xF: Optional[float]
     xOH: Optional[float]
     confirmed: bool
+    arrangement_note: str = ""
+    status: str = ""   # computed | planned
 
 
 def _to_float(s: str) -> Optional[float]:
@@ -51,6 +53,8 @@ def load_composition_map(path: str) -> dict[str, Composition]:
                 xF=_to_float(row.get("xF", "")),
                 xOH=_to_float(row.get("xOH", "")),
                 confirmed=_to_bool(row.get("confirmed", "")),
+                arrangement_note=(row.get("arrangement_note") or "").strip(),
+                status=(row.get("status") or "").strip(),
             )
     return result
 
