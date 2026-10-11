@@ -107,6 +107,22 @@ def test_missing_reference_returns_pending():
     assert r.reason  # 사유 존재
 
 
+def test_p_indices_single_set_no_mix():
+    """P 지표는 한 표면의 세 가스를 '같은 세트' 안에서만 계산한다(세트 혼합 금지).
+
+    Ti2CO2·Ti2CF2 는 SET1·SET2 양쪽에 복합체가 있어 예전엔 가스가 서로 다른 세트에서
+    뽑혀 'calc_group 불일치'로 P 가 데이터 없음이 됐다. best_calc_group_for_surface 로
+    가스를 가장 많이 보유한 단일 세트(SET1)에서 계산되어야 한다.
+    """
+    from core.screening import p_indices, best_calc_group_for_surface
+    entries = load_energies(ENERGIES).entries
+    for s in ("Ti2CO2", "Ti2CF2"):
+        assert best_calc_group_for_surface(entries, s) == "SET1"
+        p = p_indices(entries, s)
+        assert p["P(CO2/H2O)"].ok, f"{s} P(CO2/H2O): {p['P(CO2/H2O)'].reason}"
+        assert p["P(CO2/SO2)"].ok, f"{s} P(CO2/SO2): {p['P(CO2/SO2)'].reason}"
+
+
 def test_duplicate_source_file_different_energy_rejected():
     # 같은 source_file 에 다른 energy_Ry → 등록 거부 (요구 7-(4))
     rows = [

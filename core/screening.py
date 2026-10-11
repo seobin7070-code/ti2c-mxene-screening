@@ -110,14 +110,34 @@ def all_adsorption_rows(entries) -> list[dict]:
     return rows
 
 
-def eads_for_surface(entries: list[EnergyEntry], surface: str) -> dict[str, AdResult]:
-    """표면의 세 가스 E_ads 결과."""
-    return {g: compute_ad_for(entries, surface, g) for g in GASES}
+def best_calc_group_for_surface(entries, surface: str) -> Optional[str]:
+    """표면의 세 가스를 '한 세트 안에서' 가장 많이 계산할 수 있는 calc_group.
+
+    P 지표는 세트를 섞어서 빼면 안 되므로(데이터 무결성 철칙), 표면별로 가스 복합체를
+    가장 많이 보유한 단일 세트를 골라 그 안에서만 E_ads·P 를 계산한다.
+    동점이면 calc_groups(entries) 등장 순서가 빠른 세트를 쓴다.
+    """
+    best, best_n = None, -1
+    for cg in calc_groups(entries):
+        n = sum(1 for g in GASES
+                if find_adsorbed(entries, surface, g, calc_group=cg) is not None)
+        if n > best_n:
+            best, best_n = cg, n
+    return best if best_n > 0 else None
 
 
-def p_indices(entries: list[EnergyEntry], surface: str) -> dict[str, PResult]:
-    """P(CO2/H2O), P(CO2/SO2) 계산."""
-    e = eads_for_surface(entries, surface)
+def eads_for_surface(entries: list[EnergyEntry], surface: str,
+                     calc_group: Optional[str] = None) -> dict[str, AdResult]:
+    """표면의 세 가스 E_ads 결과. calc_group 미지정 시 가스를 가장 많이 보유한 단일 세트에서 계산."""
+    cg = calc_group if calc_group is not None else best_calc_group_for_surface(entries, surface)
+    return {g: compute_ad_for(entries, surface, g, calc_group=cg) for g in GASES}
+
+
+def p_indices(entries: list[EnergyEntry], surface: str,
+              calc_group: Optional[str] = None) -> dict[str, PResult]:
+    """P(CO2/H2O), P(CO2/SO2) 계산. 세 가스를 동일 세트 안에서만 계산해 세트 혼합을 막는다."""
+    cg = calc_group if calc_group is not None else best_calc_group_for_surface(entries, surface)
+    e = eads_for_surface(entries, surface, calc_group=cg)
     return {
         "P(CO2/H2O)": selectivity_P("P(CO2/H2O)", e["H2O"], e["CO2"], "H2O"),
         "P(CO2/SO2)": selectivity_P("P(CO2/SO2)", e["SO2"], e["CO2"], "SO2",

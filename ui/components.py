@@ -134,11 +134,22 @@ def progress_card(label: str, done: int, need: int) -> str:
 
 
 def progress_bar(done: int, need: int) -> str:
-    pct = 0 if need == 0 else min(100, int(done / need * 100))
+    """학습 데이터 진행바. need(활성 최소치)를 채우면 '활성'으로 표기한다.
+
+    done ≥ need 이면 100%로 꽉 채우고 'n개 · 활성'(초록)으로 보여준다.
+    (예전엔 9/3 처럼 분모를 초과한 혼란스러운 표기였음)
+    """
+    met = need > 0 and done >= need
+    pct = 100 if met else (0 if need == 0 else min(100, int(done / need * 100)))
+    label = f"{done}개 · 활성" if met else f"{done}/{need}"
+    fill_color = "#059669" if met else None  # 활성은 초록, 아니면 기본(테마 primary)
+    fill_style = f"width:{pct}%" + (f";background:{fill_color}" if fill_color else "")
+    label_cls = "mono" + ("" if met else " hint")
+    label_color = ";color:#059669;font-weight:600" if met else ""
     return (
         f'<div style="display:flex;align-items:center;gap:10px">'
-        f'<div class="progress-track" style="flex:1"><div class="progress-fill" style="width:{pct}%"></div></div>'
-        f'<span class="mono hint">{done}/{need}</span></div>'
+        f'<div class="progress-track" style="flex:1"><div class="progress-fill" style="{fill_style}"></div></div>'
+        f'<span class="{label_cls}" style="white-space:nowrap{label_color}">{label}</span></div>'
     )
 
 

@@ -35,7 +35,19 @@ def test_descriptor_coordinates():
         assert c.confirmed is True
 
 
-# ── 요구사항 2: 통합 학습 데이터가 충분(현재 13점, 활성 threshold=3) ──
+def test_app_imports_get_grid():
+    """역방향 추천 페이지가 쓰는 get_grid 가 app 네임스페이스에 로드되어야 한다.
+
+    예전엔 app.py 가 core.grid.get_grid 를 import 하지 않아, 추천 모드에서
+    NameError: name 'get_grid' is not defined 로 페이지가 크래시했다.
+    """
+    import importlib
+    app = importlib.import_module("app")
+    assert hasattr(app, "get_grid"), "app.py 에 get_grid 미로드(역방향 추천 크래시)"
+    assert len(app.get_grid("quarter")) == 15
+
+
+# ── 요구사항 2: 통합 학습 데이터가 충분(현재 25점, 활성 threshold=3) ──
 def test_unified_training_enough():
     entries, comp = _load()
     pts = S.training_points_unified(entries, comp)

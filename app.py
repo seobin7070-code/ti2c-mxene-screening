@@ -22,6 +22,7 @@ from core import screening as S
 from core import gpr_model as G
 from core.classify import classify, ClassifyInput
 from core.coords import is_normalized, composition_sum
+from core.grid import get_grid
 from core.conditions import NOTE as COND_NOTE, NOTE_HINT as COND_HINT, ppm_to_molpct
 
 from ui import theme
@@ -256,8 +257,9 @@ def page_forward():
 
 
 def _forward_metrics(surface, co2_raw, h2o_raw, so2_raw, unit):
-    """계산값 기반 P·분류."""
-    p = S.p_indices(entries, surface)
+    """계산값 기반 P·분류. 세 가스를 동일 세트 안에서만 계산(세트 혼합 금지)."""
+    cg = S.best_calc_group_for_surface(entries, surface)
+    p = S.p_indices(entries, surface, calc_group=cg)
     # 조건 보정
     try:
         if unit == "ppm":
@@ -292,7 +294,7 @@ def _forward_metrics(surface, co2_raw, h2o_raw, so2_raw, unit):
 
     # 분류 (P(CO2/H2O) 기준)
     C.section_title("분류")
-    e_co2 = S.compute_ad_for(entries, surface, "CO2")
+    e_co2 = S.compute_ad_for(entries, surface, "CO2", calc_group=cg)
     if ph.ok and cc and cc.delta_h2o is not None:
         p_cond = ph.value_eV + cc.delta_h2o
         inp = ClassifyInput(mu_p_cond=p_cond, sigma_p=0.0,
@@ -317,7 +319,7 @@ def _forward_metrics(surface, co2_raw, h2o_raw, so2_raw, unit):
     # 계산 과정 보기
     with st.expander("계산 과정 보기 (세 에너지 값 · 뺄셈 식 · Ry→eV · 출처)"):
         for g in GASES:
-            r = S.compute_ad_for(entries, surface, g)
+            r = S.compute_ad_for(entries, surface, g, calc_group=cg)
             if not r.ok:
                 st.markdown(f"**{g}**: {r.reason}")
                 continue
@@ -656,8 +658,11 @@ def page_model():
                  "Eads_SO2": "Eads(SO₂)", "Delta_d": "Δd"}
     for t in G.TARGETS:
         pts = S.training_points(entries, comp_map, t)
-        C.section_title(f"{label_map[t]} — 학습 데이터 {len(pts)}/{settings.min_train_points}")
-        st.markdown(C.progress_bar(len(pts), settings.min_train_points), unsafe_allow_html=True)
+        n = len(pts)
+        state = f"{n}개 · 활성" if n >= settings.min_train_points \
+            else f"{n}/{settings.min_train_points}"
+        C.section_title(f"{label_map[t]} — 학습 데이터 {state}")
+        st.markdown(C.progress_bar(n, settings.min_train_points), unsafe_allow_html=True)
         q = G.loocv(pts, t, settings.min_train_points)
         if q.ok:
             cc = st.columns(2)
