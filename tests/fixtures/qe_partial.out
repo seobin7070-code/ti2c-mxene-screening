@@ -1,0 +1,13 @@
+     Program PWSCF v.7.2 starts
+
+     number of atoms/cell      =           12
+     kinetic-energy cutoff     =      60.0000  Ry
+     charge density cutoff     =     480.0000  Ry
+     number of spin components =            1
+
+     number of k points=     5
+
+     Self-consistent Calculation
+
+     iteration #  1     ecut=    60.00 Ry     beta= 0.70
+     iteration #  2     ecut=    60.00 Ry     beta= 0.70

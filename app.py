@@ -21,6 +21,11 @@ from core import registry
 from core import gpr
 from core.quality import loocv
 from core.export import df_to_csv_bytes, ensure_provenance_columns, fig_to_png_bytes
+from core import qe_parser
+from core import jobs as JOBS
+from core import roadmap as ROADMAP
+from core import integrity as INTEG
+from core import datafiles as DF
 
 from ui import theme
 from ui import components as C
@@ -37,6 +42,9 @@ DATA_DIR = os.path.join(HERE, "data")
 ENERGIES_CSV = os.path.join(DATA_DIR, "energies.csv")
 GEOMETRY_CSV = os.path.join(DATA_DIR, "geometry.csv")
 COMP_CSV = os.path.join(DATA_DIR, "composition_map.csv")
+JOBS_CSV = os.path.join(DATA_DIR, "jobs.csv")
+BACKUP_DIR = os.path.join(DATA_DIR, "backup")
+AUDIT_CSV = os.path.join(DATA_DIR, "audit_log.csv")
 
 GASES = ["CO2", "H2O", "SO2"]
 P_METRICS = ["P(CO2/H2O)", "P(CO2/SO2)"]
@@ -1069,15 +1077,210 @@ def page_flue_gas():
 
 
 def page_out_inspector():
-    _placeholder("데이터", ".out 파일 검사기", "Quantum ESPRESSO 출력 파일을 파싱·검증합니다.")
+    C.page_header_bc("데이터", ".out 파일 검사기",
+                     "Quantum ESPRESSO 출력 파일을 파싱하고 CSV 값과 대조합니다.")
+    C.notice("info", "파싱 실패 항목은 값을 추정하지 않고 사유를 표시합니다.",
+             "energies.csv 반영은 미리보기 후 확인 버튼을 눌러야 하며, 백업과 감사 로그가 남습니다.")
+
+    ups = st.file_uploader("QE .out 파일 업로드 (다중 가능)", type=["out", "txt"],
+                           accept_multiple_files=True)
+    if not ups:
+        C.empty_state_svg(ILL.empty_waiting(), ".out 파일을 업로드하세요.",
+                          "최종 total energy·수렴·JOB DONE·계산 조건·pseudo를 파싱합니다.")
+        C.footer()
+        return
+
+    by_source = {e.source_file: e for e in entries}
+    candidates = []  # 반영 후보 (현재 CSV에 없는 source_file)
+
+    for up in ups:
+        try:
+            text = up.read().decode("utf-8", errors="replace")
+        except Exception as ex:
+            C.notice("suspect", f"{up.name} 읽기 실패", str(ex))
+            continue
+        r = qe_parser.parse_out_text(text)
+
+        C.section_head(ILL.icon_dft(), up.name)
+        # 파싱 결과 표
+        prows = [
+            ("total energy (Ry)", r.total_energy_8dp or "— (파싱 실패)"),
+            ("수렴(converged)", {True: "예", False: "아니오", None: "— (없음)"}[r.converged]),
+            ("JOB DONE", "예" if r.job_done else "아니오"),
+            ("atoms/cell", r.n_atoms if r.n_atoms is not None else "—"),
+            ("ecutwfc (Ry)", r.ecutwfc if r.ecutwfc is not None else "—"),
+            ("ecutrho (Ry)", r.ecutrho if r.ecutrho is not None else "—"),
+            ("k points", r.kpoints or "—"),
+            ("nspin", r.nspin if r.nspin is not None else "—"),
+            ("vdW", r.vdw or "—"),
+            ("pseudos", ", ".join(r.pseudos) if r.pseudos else "—"),
+        ]
+        st.dataframe(pd.DataFrame(prows, columns=["항목", "값"]),
+                     width='stretch', hide_index=True)
+
+        if r.errors:
+            C.notice("pending", "파싱 경고/실패", " · ".join(r.errors))
+
+        # CSV source_file 대조 (Ti2C_FH 등 검증)
+        if up.name in by_source:
+            e = by_source[up.name]
+            cmp = qe_parser.compare_to_csv_energy(r, e.energy_Ry)
+            if cmp["match"] is True:
+                C.notice("ok", f"CSV 값과 일치 ({e.key})",
+                         f"CSV: {e.energy_Ry:.8f} Ry · 파일: {r.total_energy_8dp} Ry")
+            elif cmp["match"] is False:
+                C.notice("suspect", f"CSV 값과 불일치 ({e.key})",
+                         f"CSV: {e.energy_Ry:.8f} Ry · 파일: {r.total_energy_8dp} Ry · {cmp['reason']}")
+            else:
+                C.notice("pending", f"대조 불가 ({e.key})", cmp["reason"])
+        else:
+            # CSV에 없는 새 파일 → 행 후보
+            if r.total_energy_Ry is not None:
+                candidates.append({"source_file": up.name, "parsed": r})
+            else:
+                C.notice("pending", "행 후보 생성 불가",
+                         "에너지를 파싱하지 못해 energies.csv 후보를 만들 수 없습니다.")
+
+    # ── energies.csv 행 후보 생성 → 미리보기 → 확인 ──
+    if candidates:
+        C.section_head(ILL.icon_metrics(), "energies.csv 행 후보")
+        st.caption("아래는 현재 CSV에 없는 파일에서 생성한 후보입니다. 확인 전에는 반영되지 않습니다.")
+        prev_rows = []
+        for c in candidates:
+            r = c["parsed"]
+            prev_rows.append({
+                "key": f"NEW/{c['source_file']}", "role": "", "surface": "", "gas": "",
+                "energy_Ry": r.total_energy_8dp, "source_file": c["source_file"],
+                "calc_group": "", "status": "pending",
+                "n_atoms": r.n_atoms or "", "ecutwfc": r.ecutwfc or "",
+                "ecutrho": r.ecutrho or "", "kpoints": r.kpoints or "",
+                "nspin": r.nspin or "", "vdw": r.vdw or "",
+            })
+        st.dataframe(pd.DataFrame(prev_rows), width='stretch', hide_index=True)
+        st.caption("role/surface/gas/calc_group은 비어 있습니다. 반영 후 데이터 레지스트리에서 "
+                   "보완하세요. (가상 값으로 채우지 않습니다.)")
+        if st.button("확인 후 energies.csv에 추가", type="primary"):
+            try:
+                # 1) 백업
+                DF.backup_file(ENERGIES_CSV, BACKUP_DIR)
+                # 2) 기존 내용 + 새 행 (기존 값 불변, append만)
+                with open(ENERGIES_CSV, encoding="utf-8") as f:
+                    existing = f.read()
+                lines = [existing.rstrip("\n")]
+                for c in candidates:
+                    r = c["parsed"]
+                    # 기본 8컬럼만 append (선택 컬럼은 레지스트리에서 보완)
+                    lines.append(f"NEW/{c['source_file']},,,,"
+                                 f"{r.total_energy_8dp},{c['source_file']},,pending")
+                    DF.append_audit(AUDIT_CSV, "add_candidate",
+                                    f"NEW/{c['source_file']}", "", r.total_energy_8dp or "",
+                                    c["source_file"])
+                # 3) 원자적 쓰기
+                DF.atomic_write(ENERGIES_CSV, "\n".join(lines) + "\n")
+                C.notice("ok", f"{len(candidates)}건이 추가되었습니다.",
+                         "백업과 감사 로그가 기록되었습니다. 새로고침 후 레지스트리에서 확인하세요.")
+            except Exception as ex:
+                C.notice("suspect", "반영 실패 — 변경이 롤백되었습니다.", str(ex))
+
+    C.footer()
 
 
 def page_jobs():
-    _placeholder("데이터", "계산 작업 관리", "계산 작업 목록과 진행 현황을 관리합니다.")
+    C.page_header_bc("데이터", "계산 작업 관리",
+                     "계산 작업 목록과 진행 현황을 관리합니다 (보고서 4.1절 34건 계획 기준).")
+
+    # jobs.csv 로드 (없으면 초기 생성), energies와 동기화
+    if os.path.exists(JOBS_CSV):
+        jobs = pd.read_csv(JOBS_CSV, dtype=str, keep_default_na=False).to_dict("records")
+    else:
+        jobs = JOBS.build_initial_jobs()
+    jobs = JOBS.sync_with_energies(jobs, entries)
+
+    summary = JOBS.progress_summary(jobs)
+    est = JOBS.estimate_remaining(jobs)
+
+    # 진행 현황 KPI
+    C.section_head(ILL.icon_metrics(), "진행 현황")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.markdown(C.kpi_equal("완료", f'<div class="kpi-value">{summary["done"]}'
+                            f'<span class="kpi-unit">/ {summary["total"]}</span></div>'),
+                unsafe_allow_html=True)
+    c2.markdown(C.kpi_equal("대기(todo)", f'<div class="kpi-value">{summary["todo"]}</div>'),
+                unsafe_allow_html=True)
+    c3.markdown(C.kpi_equal("실행/실패",
+                f'<div class="kpi-value">{summary["running"]}/{summary["failed"]}</div>'),
+                unsafe_allow_html=True)
+    eta_txt = ("측정 필요" if est["eta_h"] is None else f'{est["eta_h"]:.1f} h')
+    c4.markdown(C.kpi_equal("예상 잔여 시간",
+                f'<div class="kpi-value" style="font-size:22px">{eta_txt}</div>'
+                '<div class="hint" style="margin-top:6px">입력된 wall_time 평균 × 남은 건수</div>'),
+                unsafe_allow_html=True)
+    if est["eta_h"] is None:
+        st.caption("wall_time_h가 입력된 작업이 없어 예상 시간을 계산할 수 없습니다 (가상 수치 없음).")
+
+    # 편집 가능한 작업 표
+    C.section_head(ILL.icon_dft(), "작업 목록 (편집·행 추가 가능)")
+    df = pd.DataFrame(jobs, columns=JOBS.JOB_COLUMNS)
+    edited = st.data_editor(
+        df, width='stretch', num_rows="dynamic", hide_index=True,
+        column_config={
+            "status": st.column_config.SelectboxColumn(
+                "status", options=sorted(JOBS.VALID_JOB_STATUS)),
+        },
+        key="jobs_editor",
+    )
+    cc1, cc2 = st.columns(2)
+    if cc1.button("작업 목록 저장 (jobs.csv)", type="primary"):
+        try:
+            DF.backup_file(JOBS_CSV, BACKUP_DIR)
+            DF.atomic_write(JOBS_CSV, edited.to_csv(index=False))
+            C.notice("ok", "저장되었습니다.", "jobs.csv에 원자적으로 기록되었습니다.")
+        except Exception as ex:
+            C.notice("suspect", "저장 실패 — 롤백되었습니다.", str(ex))
+    cc2.download_button("작업 목록 CSV 다운로드",
+                        data=df_to_csv_bytes(edited), file_name="jobs.csv", mime="text/csv")
+    C.footer()
 
 
 def page_integrity():
-    _placeholder("데이터", "무결성 점검", "데이터 자동 검사와 스냅샷 해시를 제공합니다.")
+    C.page_header_bc("데이터", "무결성 점검",
+                     "자동 검사 결과와 데이터 스냅샷 해시로 재현성을 확인합니다.")
+
+    checks = INTEG.run_all(entries)
+    n_fail = sum(1 for c in checks if c.status == "fail")
+    n_warn = sum(1 for c in checks if c.status == "warn")
+
+    # 요약
+    if n_fail:
+        C.notice("suspect", f"실패 {n_fail}건 · 경고 {n_warn}건", "아래 항목을 확인하세요.")
+    elif n_warn:
+        C.notice("pending", f"경고 {n_warn}건", "데이터 보완이 필요한 항목이 있습니다.")
+    else:
+        C.notice("ok", "모든 검사 통과", "현재 데이터에서 발견된 무결성 문제가 없습니다.")
+
+    # 검사 목록
+    C.section_head(ILL.icon_dft(), "자동 검사")
+    rows_html = ""
+    for c in checks:
+        pill = {"pass": C.status_pill("ok", "통과"),
+                "warn": C.status_pill("pending", "경고"),
+                "fail": C.status_pill("suspect", "실패")}[c.status]
+        rows_html += (f'<div style="display:flex;gap:10px;padding:8px 0;'
+                      f'border-bottom:1px solid {T.BORDER}">{pill}'
+                      f'<span><b>{c.name}</b> — <span class="hint">{c.detail}</span></span></div>')
+    C.card(rows_html)
+
+    # 데이터 스냅샷 해시 (재현성)
+    C.section_head(ILL.icon_metrics(), "데이터 스냅샷")
+    h = DF.sha256_file(ENERGIES_CSV)
+    st.markdown(
+        f'<div class="card"><div class="kpi-label">energies.csv SHA-256</div>'
+        f'<div class="mono" style="font-size:12px;word-break:break-all;margin-top:4px">{h}</div>'
+        '<div class="hint" style="margin-top:6px">이 해시로 데이터 스냅샷의 재현성을 '
+        '확인할 수 있습니다.</div></div>',
+        unsafe_allow_html=True,
+    )
+    C.footer()
 
 
 def page_roadmap():

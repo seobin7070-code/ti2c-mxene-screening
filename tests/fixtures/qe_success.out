@@ -1,0 +1,29 @@
+     Program PWSCF v.7.2 starts
+
+     bravais-lattice index     =            0
+     number of atoms/cell      =           12
+     number of electrons       =       120.00
+     kinetic-energy cutoff     =      60.0000  Ry
+     charge density cutoff     =     480.0000  Ry
+     number of spin components =            1
+     input_dft                 = 'PBE'
+     vdw_corr                  = 'grimme-d3'
+
+     number of k points=     5
+
+     PseudoPot. # 1 for Ti read from file:
+     ./pseudo/Ti.pbe-spn-kjpaw_psl.1.0.0.UPF
+     PseudoPot. # 2 for C read from file:
+     ./pseudo/C.pbe-n-kjpaw_psl.1.0.0.UPF
+     PseudoPot. # 3 for O read from file:
+     ./pseudo/O.pbe-n-kjpaw_psl.1.0.0.UPF
+
+     Self-consistent Calculation
+
+     convergence has been achieved in  18 iterations
+
+!    total energy              =   -1333.32037072 Ry
+
+     This run was terminated on:  10:12:00  1Jan2026
+
+     JOB DONE.
