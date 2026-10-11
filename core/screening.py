@@ -188,6 +188,71 @@ def training_points(entries, comp_map, target: str) -> list:
     return pts
 
 
+def training_points_multiset(entries, comp_map, target: str) -> list:
+    """세트 통합 학습 데이터: [((xO,xF,xOH), calc_group, y)].
+
+    각 (표면, 세트) 조합에서 '같은 세트 안에서만' E_ads 를 계산한다(세트 혼합 금지).
+    조성이 확정된 표면만 포함한다. 서로 다른 세트는 섞어서 빼지 않고, 세트 지표를
+    별도 차원으로 넘겨 모델이 구분해 학습하게 한다.
+    """
+    pts = []
+    if target == "Delta_d":
+        return pts  # geometry 데이터 없음
+    gas = _TARGET_GAS.get(target)
+    if gas is None:
+        return pts
+    for cg in calc_groups(entries):
+        for s in surfaces(entries, calc_group=cg):
+            comp = comp_map.get(s)
+            if not is_trainable(comp):
+                continue
+            r = compute_ad_for(entries, s, gas, calc_group=cg)
+            if r.ok:
+                pts.append(((comp.xO, comp.xF, comp.xOH), cg, r.E_ad_eV))
+    return pts
+
+
+def training_points_unified(entries, comp_map) -> list:
+    """통합 학습 데이터: [((xO,xF,xOH), calc_group, gas, y)].
+
+    조성 확정 표면의 모든 (세트, 가스) E_ads 계산값을 세트 안에서만 계산해 모은다.
+    가스를 입력 차원으로 넣어 하나의 GPR 로 학습(가스별로 나누지 않아 7개 이상 확보).
+    """
+    pts = []
+    for cg in calc_groups(entries):
+        for s in surfaces(entries, calc_group=cg):
+            comp = comp_map.get(s)
+            if not is_trainable(comp):
+                continue
+            for g in GASES:
+                r = compute_ad_for(entries, s, g, calc_group=cg)
+                if r.ok:
+                    pts.append(((comp.xO, comp.xF, comp.xOH), cg, g, r.E_ad_eV))
+    return pts
+
+
+def confirmed_surface_markers(entries, comp_map) -> list[dict]:
+    """조성 확정 표면을 세트별로 모아 지도 마커 데이터로 반환한다.
+
+    같은 표면이 여러 세트에 있으면 세트별로 각각 마커를 만든다.
+    반환: [{surface, calc_group, xO, xF, xOH, eads:{gas:eV}}]
+    """
+    out = []
+    for cg in calc_groups(entries):
+        for s in surfaces(entries, calc_group=cg):
+            comp = comp_map.get(s)
+            if not is_trainable(comp):
+                continue
+            eads = {}
+            for g in GASES:
+                r = compute_ad_for(entries, s, g, calc_group=cg)
+                if r.ok:
+                    eads[g] = r.E_ad_eV
+            out.append({"surface": s, "calc_group": cg,
+                        "xO": comp.xO, "xF": comp.xF, "xOH": comp.xOH, "eads": eads})
+    return out
+
+
 def nearest_computed(entries, comp_map, xO, xF, xOH) -> Optional[dict]:
     """임의 조성에서 가장 가까운 계산 조성과 거리(u,v 평면)."""
     best = None

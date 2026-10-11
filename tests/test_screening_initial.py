@@ -63,20 +63,28 @@ def test_ti2c_fh_unconfirmed():
     assert c.xO is None
 
 
-def test_set1_surfaces_unconfirmed_composition():
+def test_set1_surfaces_have_assigned_coords():
     _, comp = _load()
-    # 세트1 전용 표면은 좌표 미확정(임의로 지어내지 않음)
-    for s in ["Ti2C_OF_alt", "Ti2C_FOH_clu"]:
-        assert comp[s].xO is None
-        assert comp[s].confirmed is False
+    # 세트1 전용 표면에 요구된 조성 좌표가 부여됨 (Descriptor)
+    of = comp["Ti2C_OF_alt"]
+    assert (of.xO, of.xF, of.xOH) == (0.5, 0.5, 0.0) and of.confirmed is True
+    foh = comp["Ti2C_FOH_clu"]
+    assert (foh.xO, foh.xF, foh.xOH) == (0.0, 0.5, 0.5) and foh.confirmed is True
 
 
-def test_all_four_gpr_inactive():
+def test_unified_gpr_active_with_7plus():
+    """세트 통합(가스 차원 포함) 학습 데이터가 7개 이상이면 통합 GPR이 활성화된다."""
+    from core.gpr_model import fit_unified, UnifiedModel
     entries, comp = _load()
     st = load_settings(SETTINGS)
-    for t in TARGETS:
-        m = fit_target(S.training_points(entries, comp, t), t, st.min_train_points)
-        assert isinstance(m, GprUnavailable), f"{t} 활성화됨(기대: 비활성)"
+    pts = S.training_points_unified(entries, comp)
+    assert len(pts) >= 7, f"통합 학습 데이터 {len(pts)}개 (<7)"
+    m = fit_unified(pts, st.min_train_points)
+    assert isinstance(m, UnifiedModel)
+    # 학습점 예측이 실제 계산값에 근접
+    mu, _ = m.predict((0.0, 1.0, 0.0), "SET1", "CO2")
+    r = S.compute_ad_for(entries, "Ti2CF2", "CO2", calc_group="SET1")
+    assert abs(mu - r.E_ad_eV) < 0.02
 
 
 def test_settings_defaults():

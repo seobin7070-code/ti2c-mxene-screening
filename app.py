@@ -358,54 +358,120 @@ def _forward_prediction(xO, xF, xOH):
 
 
 # ═══════════════════════ 역방향 추천 (PDF 6.2) ═══════════════════════
+def get_unified_model():
+    pts = S.training_points_unified(entries, comp_map)
+    return G.fit_unified(pts, settings.min_train_points), len(pts)
+
+
 def page_reverse():
-    C.breadcrumb("설계", "역방향 추천")
-    C.page_header("역방향 추천", "조성 격자를 평가해 우선 검토 후보를 제안합니다.")
+    C.breadcrumb("설계", "GPR 예측 및 역방향 추천")
+    C.page_header("GPR 예측 및 역방향 추천",
+                  "조성·세트·가스를 입력으로 학습한 GPR로 흡착 에너지를 예측하고, "
+                  "목표 흡착 에너지에 가장 가까운 조성을 추천합니다.")
     C.scope_banner()
 
-    models = get_models()
-    active = [t for t in G.TARGETS if isinstance(models[t], G.GprModel)]
-    if not active:
-        # 잠금 화면
+    model, n_train = get_unified_model()
+    if not isinstance(model, G.UnifiedModel):
+        # 데이터 부족 잠금
         C.section_head(ILL.icon_gpr(), "추천 잠금")
-        bars = ""
-        label_map = {"Eads_CO2": "Eads(CO₂)", "Eads_H2O": "Eads(H₂O)",
-                     "Eads_SO2": "Eads(SO₂)", "Delta_d": "Δd"}
-        for t in G.TARGETS:
-            m = models[t]
-            bars += (f'<div style="margin-top:8px;text-align:left"><div class="hint">{label_map[t]}</div>'
-                     f'{C.progress_bar(m.n, settings.min_train_points)}</div>')
         st.markdown(
-            html_block_wrap('<div class="card" style="text-align:center">'
-                            f'<div style="font-size:28px">🔒</div>'
-                            f'<div style="font-weight:600;margin-top:6px">GPR 학습 데이터 부족</div>'
-                            f'<div class="hint" style="margin:4px 0 12px">타깃별 학습 데이터가 '
-                            f'{settings.min_train_points}개에 도달하면 추천이 활성화됩니다. '
-                            f'아직 계산하지 않은 계획 조성을 먼저 계산하세요.</div>'
-                            f'<div style="max-width:420px;margin:0 auto">{bars}</div></div>'),
+            '<div class="card" style="text-align:center">'
+            '<div style="font-size:28px">🔒</div>'
+            '<div style="font-weight:600;margin-top:6px">GPR 학습 데이터 부족</div>'
+            f'<div class="hint" style="margin:4px 0 12px">통합 학습 데이터가 '
+            f'{settings.min_train_points}개에 도달하면 활성화됩니다. 현재 {n_train}개.</div>'
+            f'<div style="max-width:420px;margin:0 auto">{C.progress_bar(n_train, settings.min_train_points)}</div>'
+            '</div>',
             unsafe_allow_html=True,
         )
-        # 필요한 계산(계획 조성) 안내
-        planned = [c for c in comp_map.values() if c.status == "planned"]
-        if planned:
-            items = "".join(
-                f'<div style="padding:6px 0;border-bottom:1px solid {T.BORDER}">'
-                f'{C.status_pill("pending", "계획")} <b>{c.surface}</b> '
-                f'<span class="hint">{c.arrangement_note}</span></div>'
-                for c in planned)
-            C.section_title("먼저 계산할 계획 조성")
-            C.card(items)
         C.footer()
         return
 
-    # 활성 시: 격자 평가 (요약)
-    C.notice("info", "활성 모델로 격자를 평가합니다.",
-             "P 계산에 두 Eads 예측이 모두 필요합니다.")
+    st.success(f"GPR 통합 모델 활성 (학습 데이터 {n_train}개). "
+               "세트(calc_group)는 입력 차원으로 구분되며, 서로 다른 세트의 에너지를 섞어서 빼지 않습니다.")
+
+    # ── 입력 패널 ──
+    left, right = st.columns([1, 1.4], gap="large")
+    with left:
+        C.section_title("예측 조건")
+        cg = st.selectbox("데이터 세트 (스케일 기준)", list(model.scales.keys()),
+                          help="세트마다 셀 스케일이 다르므로 예측 기준 세트를 지정합니다.")
+        mode = st.radio("모드", ["조성 → 예측", "목표 흡착 에너지 → 조성 추천"])
+
+        if mode == "조성 → 예측":
+            xF = st.slider("xF (–F)", 0.0, 1.0, 0.5, 0.05)
+            xO = st.slider("xO (–O)", 0.0, 1.0, 0.5, 0.05)
+            xOH = st.slider("xOH (–OH)", 0.0, 1.0, 0.0, 0.05)
+            ssum = xO + xF + xOH
+            if abs(ssum - 1.0) > 1e-6:
+                C.notice("suspect", f"합이 1이 아닙니다(현재 {ssum:.2f})",
+                         "세 비율의 합이 1이 되도록 맞춰 주세요.")
+        else:
+            st.caption("추천에 사용할 가스별 목표 E_ads(eV)를 지정하세요(선택).")
+            use_co2 = st.checkbox("CO₂ 목표 사용", True)
+            tgt_co2 = st.number_input("목표 E_ads(CO₂)", value=-0.02, step=0.01, format="%.3f")
+            use_so2 = st.checkbox("SO₂ 목표 사용", True)
+            tgt_so2 = st.number_input("목표 E_ads(SO₂)", value=-0.07, step=0.01, format="%.3f")
+            use_h2o = st.checkbox("H₂O 목표 사용", False)
+            tgt_h2o = st.number_input("목표 E_ads(H₂O)", value=-0.04, step=0.01, format="%.3f")
+
+    with right:
+        if mode == "조성 → 예측":
+            C.section_title(f"GPR 예측 — {cg} 기준")
+            if abs((xO + xF + xOH) - 1.0) <= 1e-6:
+                rows_html = ""
+                for g in GASES:
+                    mu, sigma = model.predict((xO, xF, xOH), cg, g)
+                    m = T.gas_meta(g)
+                    rows_html += (f'<div style="padding:6px 0;border-bottom:1px solid {T.BORDER}">'
+                                  f'{C.gas_pill(g)} <span class="mono" style="color:{m["color"]}">'
+                                  f'{mu:+.3f} ± {sigma:.3f} eV</span> '
+                                  f'<span class="hint">(예측)</span></div>')
+                C.card(rows_html)
+                st.caption(G.SIGMA_NOTE)
+                near = S.nearest_computed(entries, comp_map, xO, xF, xOH)
+                if near:
+                    st.caption(f"가장 가까운 계산 조성: {near['surface']} (거리 {near['distance']:.3f})")
+            else:
+                C.empty_state("⚖", "조성 합을 1로 맞추면 예측이 표시됩니다.")
+        else:
+            C.section_title(f"조성 추천 — {cg} 기준")
+            targets = {}
+            if use_co2:
+                targets["CO2"] = tgt_co2
+            if use_so2:
+                targets["SO2"] = tgt_so2
+            if use_h2o:
+                targets["H2O"] = tgt_h2o
+            if not targets:
+                C.notice("pending", "목표 가스를 하나 이상 선택하세요.")
+            else:
+                recs = G.recommend_unified(model, get_grid(settings.composition_grid),
+                                           cg, targets, top=5)
+                items = ""
+                for i, r in enumerate(recs, 1):
+                    c = r["composition"]
+                    preds = " · ".join(
+                        f'{T.gas_meta(g)["label"]} {v[0]:+.3f}' for g, v in r["predictions"].items())
+                    items += (f'<div style="padding:8px 0;border-bottom:1px solid {T.BORDER}">'
+                              f'<b>#{i}</b> <span class="mono">xO/F/OH = '
+                              f'{c[0]:.2f}/{c[1]:.2f}/{c[2]:.2f}</span> '
+                              f'<span class="hint">목표와의 거리 {r["score"]:.4f} · 예측 {preds} eV</span></div>')
+                C.card(items)
+                st.caption("추천은 조성 격자(1/4 단위) 중 목표 E_ads에 가장 가까운 지점입니다. "
+                           + G.SIGMA_NOTE)
+
+    # LOOCV 요약
+    with st.expander("모델 성능 (LOOCV)"):
+        q = G.loocv_unified(S.training_points_unified(entries, comp_map),
+                            settings.min_train_points)
+        if q.ok:
+            st.markdown(f"- 학습 데이터: **{q.n}개** · MAE: **{q.mae:.4f} eV** · RMSE: **{q.rmse:.4f} eV**")
+            st.caption("가스를 입력 차원(원-핫)에 넣어 조성·세트·가스로 E_ads를 예측하는 "
+                       "단일 통합 GPR입니다. 세트는 지표일 뿐, 세트 간 뺄셈은 하지 않습니다.")
+        else:
+            st.info(q.reason)
     C.footer()
-
-
-def html_block_wrap(s):
-    return s
 
 
 # ═══════════════════════ 조성 지도 (PDF 6.3) ═══════════════════════
@@ -414,32 +480,36 @@ def page_map():
     C.page_header("조성 지도", "삼원 조성 공간에서 계산·계획 조성과 지표를 봅니다.")
     C.scope_banner()
 
-    tab = st.radio("지표", ["Eads(CO₂)", "Eads(H₂O)", "Eads(SO₂)", "P(CO₂/H₂O)", "Δd"],
-                   horizontal=True)
+    tab = st.radio("지표", ["Eads(CO₂)", "Eads(H₂O)", "Eads(SO₂)"], horizontal=True)
+    gas_of = {"Eads(CO₂)": "CO2", "Eads(H₂O)": "H2O", "Eads(SO₂)": "SO2"}
+    gas = gas_of[tab]
 
     markers = []
-    gas_of = {"Eads(CO₂)": "CO2", "Eads(H₂O)": "H2O", "Eads(SO₂)": "SO2"}
+    # 1) 두 세트의 확정 표면 마커 (세트별로 각각 — SET1·SET2 모두 표시)
+    for mk in S.confirmed_surface_markers(entries, comp_map):
+        value = mk["eads"].get(gas)
+        markers.append({"xO": mk["xO"], "xF": mk["xF"], "xOH": mk["xOH"],
+                        "kind": "computed", "value": value,
+                        "label": f'{mk["surface"]} ({mk["calc_group"]})'})
+    # 2) 계획 조성 (좌표는 있으나 미확정 — 빈 원). 이미 확정 좌표로 그린 점은 중복 제외.
+    drawn = {(round(m["xO"], 3), round(m["xF"], 3), round(m["xOH"], 3)) for m in markers}
     for surf, c in comp_map.items():
-        if c.xO is None:
-            # 미확정 — 삼각형에 그릴 좌표 없음 → 표시 생략(별도 안내)
+        if c.xO is None or c.confirmed:
             continue
-        kind = "computed" if (c.confirmed and surf in S.computed_surfaces(entries, comp_map)) \
-            else "planned"
-        value = None
-        if tab in gas_of and kind == "computed":
-            r = S.compute_ad_for(entries, surf, gas_of[tab])
-            value = r.E_ad_eV if r.ok else None
+        key = (round(c.xO, 3), round(c.xF, 3), round(c.xOH, 3))
+        if key in drawn:
+            continue
         markers.append({"xO": c.xO, "xF": c.xF, "xOH": c.xOH,
-                        "kind": kind, "value": value, "label": surf})
+                        "kind": "planned", "value": None, "label": f"{surf} (계획)"})
 
-    unit = "eV" if tab != "Δd" else "Å"
-    st.plotly_chart(charts.composition_map(markers, tab, unit), use_container_width=True)
-    st.caption("◆ 계산값 · 빈 원 계획 조성 · ✕ 조성 미확정은 좌표가 없어 지도에 표시되지 않습니다.")
+    st.plotly_chart(charts.composition_map(markers, tab, "eV"), use_container_width=True)
+    st.caption("◆ 계산값(세트명 표기) · 빈 원 계획 조성. 같은 조성 좌표라도 세트가 다르면 "
+               "각각의 계산값을 가집니다(세트 간 뺄셈 없음).")
 
-    # 미확정 표면 안내
-    unconf = [s for s, c in comp_map.items() if not c.confirmed and c.xO is None]
+    # 좌표 미확정 표면 안내 (좌표 자체가 없는 경우만)
+    unconf = [s for s, c in comp_map.items() if c.xO is None]
     if unconf:
-        C.notice("pending", f"조성 미확정: {', '.join(unconf)}",
+        C.notice("pending", f"조성 좌표 미확정: {', '.join(unconf)}",
                  "좌표가 확정되면 지도와 GPR 학습에 포함됩니다.")
     C.footer()
 
