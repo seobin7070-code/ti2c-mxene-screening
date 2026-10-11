@@ -268,44 +268,90 @@ footer {{ visibility: hidden; }}
 }}
 
 /* ══════════════════════ 시작 화면 (landing) ══════════════════ */
+/* landing 은 일반 블록(오버레이 아님) — Streamlit 버튼이 가려지지 않도록 한다.
+   어두운 배경은 app 컨테이너 전체에 깔고, 상단/하단 조각이 끊김 없이 이어지게 한다. */
+body.landing-active .stApp,
+body.landing-active [data-testid="stAppViewContainer"] {{
+    background: linear-gradient(135deg, {T.NAVY} 0%, #0C3A3A 55%, {T.PRIMARY} 130%) !important;
+    background-attachment: fixed !important;
+}}
+/* 시작 화면에서는 사이드바/헤더 숨김 */
+body.landing-active [data-testid="stSidebar"],
+body.landing-active [data-testid="stHeader"] {{ display:none !important; }}
+body.landing-active .block-container {{ padding-top:1.2rem !important; max-width:1100px; }}
+
 .landing-wrap {{
-    position:fixed; inset:0; z-index:1000; overflow:auto;
+    position:relative; color:#F1F5F9;
     background: linear-gradient(135deg, {T.NAVY} 0%, #0C3A3A 55%, {T.PRIMARY} 130%);
-    color:#F1F5F9;
     animation: landingFade 300ms ease;
 }}
+/* 아래 조각(콘텐츠)은 배경을 투명하게 — 상단 조각과 app 배경이 이어짐 */
+.landing-wrap-cont {{ background:transparent; }}
 @keyframes landingFade {{ from {{ opacity:0; }} to {{ opacity:1; }} }}
-.landing-pattern {{ position:absolute; inset:0; width:100%; height:100%; z-index:0; }}
+.landing-pattern {{ position:absolute; inset:0; width:100%; height:100%; z-index:0; opacity:0.5; }}
 .lp-drift {{ animation: lpDrift 9s ease-in-out infinite alternate; }}
 @keyframes lpDrift {{ from {{ transform:translateX(-30px); }} to {{ transform:translateX(30px); }} }}
-.landing-inner {{ position:relative; z-index:1; max-width:1100px; margin:0 auto; padding:28px 32px 40px; }}
+.landing-inner {{ position:relative; z-index:1; max-width:1100px; margin:0 auto; padding:20px 8px 8px; }}
+.landing-inner-cont {{ padding:8px 8px 24px; }}
 .landing-top {{ display:flex; justify-content:space-between; align-items:center; gap:12px; }}
 .landing-top .lt-left {{ display:flex; align-items:center; gap:10px; }}
 .landing-top .lt-left .ill-tri {{ width:28px; height:28px; }}
+.landing-top-right {{ display:flex; align-items:center; gap:14px; }}
 .landing-event {{ font-size:12px; color:#CBD5E1; text-align:right; }}
-.landing-hero {{ display:flex; gap:28px; align-items:center; margin-top:34px; }}
-.landing-hero-left {{ flex:1.2; min-width:0; }}
-.landing-hero-right {{ flex:1; display:flex; justify-content:center; }}
-.landing-title {{ font-size:52px; font-weight:800; line-height:1.18; letter-spacing:-0.02em; color:#fff; }}
-.landing-sub {{ font-size:16px; color:#CBD5E1; margin-top:16px; line-height:1.7; max-width:50ch; }}
-.landing-hero-svg {{ width:100%; max-width:460px; height:auto; }}
-.landing-mol {{ font-size:11px; fill:#E2E8F0; text-anchor:middle; font-family:'JetBrains Mono',monospace; }}
-.landing-layer {{ font-size:12px; fill:#0B1F33; font-weight:800; }}
-.landing-legend text {{ font-size:11px; fill:#CBD5E1; }}
-.landing-caption {{ font-size:11px; color:#94A3B8; text-align:center; margin-top:6px; font-style:italic; }}
-.landing-values {{ display:flex; gap:16px; margin-top:30px; flex-wrap:wrap; }}
+.landing-enter-link {{ font-size:12px; color:#5EEAD4 !important; text-decoration:none;
+    border:1px solid rgba(94,234,212,0.5); border-radius:7px; padding:3px 9px; white-space:nowrap; }}
+.landing-enter-link:hover {{ background:rgba(94,234,212,0.12); }}
+.landing-hero {{ display:flex; gap:28px; align-items:center; margin-top:20px; }}
+.landing-hero-left {{ flex:1.1; min-width:0; }}
+.landing-hero-right {{ flex:1.3; display:flex; justify-content:center; }}
+.landing-title {{ font-size:46px; font-weight:800; line-height:1.16; letter-spacing:-0.02em; color:#fff; }}
+.landing-sub {{ font-size:16px; color:#CBD5E1; margin-top:14px; line-height:1.6; max-width:48ch; }}
+/* 히어로 일러스트 1.4배 (max-width 460 → 644) */
+.landing-hero-svg {{ width:100%; max-width:644px; height:auto; }}
+.landing-mol {{ font-size:13px; fill:#E2E8F0; text-anchor:middle; font-family:'JetBrains Mono',monospace; }}
+.landing-layer {{ font-size:14px; fill:#0B1F33; font-weight:800; }}
+.landing-legend text {{ font-size:13px; fill:#CBD5E1; }}
+.landing-caption {{ font-size:12px; color:#94A3B8; text-align:center; margin-top:4px; font-style:italic; }}
+.landing-values {{ display:flex; gap:16px; margin-top:10px; flex-wrap:wrap; }}
 .val-item {{ flex:1; min-width:200px; display:flex; gap:10px; align-items:flex-start;
     background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12);
     border-radius:12px; padding:14px 16px; }}
 .val-item .val-ic {{ color:#5EEAD4; flex:0 0 auto; }}
 .val-svg {{ width:22px; height:22px; }}
 .val-item .val-t {{ font-size:14px; font-weight:600; color:#F1F5F9; }}
-.landing-strip {{ margin-top:26px; padding:12px 16px; border-radius:10px;
+.landing-strip {{ margin-top:16px; padding:12px 16px; border-radius:10px;
     background:rgba(0,0,0,0.22); border:1px solid rgba(255,255,255,0.1);
     font-size:13px; color:#E2E8F0; }}
 .landing-strip .mono {{ color:#5EEAD4; }}
-.landing-foot {{ margin-top:22px; font-size:12px; color:#94A3B8; }}
+.landing-foot {{ margin-top:16px; font-size:12px; color:#94A3B8; }}
 .landing-foot .wordmark {{ font-size:13px; }}
+
+/* ── 시작 화면 CTA 버튼 (body.landing-active 스코프 → 다른 페이지 영향 없음) ── */
+.landing-cta-anchor {{ margin-top:20px; }}  /* 부제와 버튼 사이 24px 이상 확보 */
+body.landing-active .stButton {{ margin-top:4px; }}
+body.landing-active .stButton > button,
+body.landing-active [data-testid="stBaseButton-primary"],
+body.landing-active [data-testid="stBaseButton-secondary"] {{
+    min-height:48px; border-radius:12px; font-size:15px; font-weight:700;
+    transition: transform 150ms ease, box-shadow 150ms ease;
+}}
+/* 주 버튼: 앰버 배경 + 네이비 글자 (대비 AA) */
+body.landing-active [data-testid="stBaseButton-primary"] {{
+    background:{T.GAS['SO2']['color']} !important; color:{T.NAVY} !important;
+    border:1px solid {T.GAS['SO2']['color']} !important;
+}}
+body.landing-active [data-testid="stBaseButton-primary"]:hover {{
+    transform:translateY(-2px); box-shadow:0 8px 20px rgba(217,119,6,0.35);
+    background:#B45309 !important; color:#fff !important;
+}}
+/* 보조 버튼: 투명 배경 + 흰 테두리 + 흰 글자 */
+body.landing-active [data-testid="stBaseButton-secondary"] {{
+    background:transparent !important; color:#fff !important;
+    border:1px solid rgba(255,255,255,0.85) !important;
+}}
+body.landing-active [data-testid="stBaseButton-secondary"]:hover {{
+    transform:translateY(-2px); background:rgba(255,255,255,0.10) !important;
+}}
 
 @media (max-width: 760px) {{
     .landing-title {{ font-size:32px; }}

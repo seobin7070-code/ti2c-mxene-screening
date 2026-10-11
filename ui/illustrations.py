@@ -459,4 +459,8 @@ def value_icon_source() -> str:
 
 
 def value_icon_explore() -> str:
-    return composition_triangle(size=24)
+    # 조성 삼각형 + 탐색 점 (다른 가치 아이콘과 동일한 .val-svg 24x24, currentColor)
+    return ('<svg viewBox="0 0 24 24" class="val-svg">'
+            '<polygon points="12,3 3,20 21,20" fill="none" stroke="currentColor" '
+            'stroke-width="1.6" stroke-linejoin="round"/>'
+            '<circle cx="12" cy="13" r="2" fill="currentColor"/></svg>')

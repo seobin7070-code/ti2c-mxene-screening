@@ -176,6 +176,10 @@ def active_model_count() -> int:
 
 
 # ───────────────────────── 시작 화면 분기 ─────────────────────────
+# 안전장치: URL ?enter=1 이면 시작 화면을 건너뛰고 바로 입장
+if not st.session_state.get("entered") and landing.should_skip_via_query():
+    st.session_state["entered"] = True
+
 if not st.session_state.get("entered"):
     landing.render(
         n_ead=len(computed_ead_rows()),

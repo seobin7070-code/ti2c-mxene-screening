@@ -1,7 +1,12 @@
-"""시작 화면 (랜딩) — 사이드바 없는 전체 화면.
+"""시작 화면 (랜딩).
 
 '플랫폼 시작하기' 클릭 시 st.session_state['entered']=True 로 Overview 진입.
 상태 스트립 수치는 core 함수 결과를 그대로 받는다 (하드코딩 금지).
+
+레이아웃: 과거엔 position:fixed 오버레이가 Streamlit 버튼을 가려 CTA가 보이지
+않았다. 이제 landing을 일반 블록으로 렌더하고 CTA(st.button)를 부제 아래·가치 카드
+위의 자연 흐름에 배치한다. 시작 화면 전용 CSS는 body.landing-active 스코프로만 적용해
+다른 페이지 버튼에 영향을 주지 않는다.
 """
 
 from __future__ import annotations
@@ -14,16 +19,38 @@ from ui import tokens as T
 from ui.htmlutil import html_block
 
 
+def _enter(nav: str | None = None) -> None:
+    st.session_state["entered"] = True
+    if nav:
+        st.session_state["_nav"] = nav
+    st.rerun()
+
+
+def should_skip_via_query() -> bool:
+    """URL에 ?enter=1 이 있으면 시작 화면을 건너뛴다 (안전장치)."""
+    try:
+        qp = st.query_params
+        val = qp.get("enter")
+    except Exception:
+        return False
+    if isinstance(val, (list, tuple)):
+        val = val[0] if val else None
+    return str(val) in ("1", "true", "True")
+
+
 def render(n_ead: int, n_models_active: int, n_models_total: int) -> None:
     """시작 화면을 렌더한다. 상태 스트립은 전달받은 수치만 표시한다."""
+    # 안전장치: ?enter=1 이면 즉시 입장
+    if should_skip_via_query():
+        _enter()
+        return
+
     tri = ILL.composition_triangle(size=28)
     wm = B.wordmark(on_dark=True, size=22)
 
-    # 로고 이미지는 파일이 있을 때만 (외부 URL 금지, 여기서는 텍스트 워드마크 사용)
     members_html = ""
     if B.has_members():
-        members_html = ('<div style="margin-top:4px">'
-                        + " · ".join(B.MEMBERS) + "</div>")
+        members_html = ('<div style="margin-top:4px">' + " · ".join(B.MEMBERS) + "</div>")
 
     values = (
         f'<div class="val-item"><span class="val-ic">{ILL.value_icon_water()}</span>'
@@ -34,6 +61,15 @@ def render(n_ead: int, n_models_active: int, n_models_total: int) -> None:
         f'<span class="val-t">적은 계산으로 조성 탐색</span></div>'
     )
 
+    # body 에 landing-active 클래스를 부여해 시작 화면 전용 버튼 CSS 스코프를 연다.
+    st.markdown(
+        "<style>:root{} </style>"
+        '<div id="landing-flag"></div>'
+        "<script>document.body && document.body.classList.add('landing-active');</script>",
+        unsafe_allow_html=True,
+    )
+
+    # ── 상단 바 + 히어로 (부제까지) ──
     st.markdown(
         html_block(f'''
 <div class="landing-wrap">
@@ -41,7 +77,10 @@ def render(n_ead: int, n_models_active: int, n_models_total: int) -> None:
   <div class="landing-inner">
     <div class="landing-top">
       <div class="lt-left">{tri}{wm}</div>
-      <div class="landing-event">{B.EVENT}</div>
+      <div class="landing-top-right">
+        <span class="landing-event">{B.EVENT}</span>
+        <a class="landing-enter-link" href="?enter=1" target="_self">입장 →</a>
+      </div>
     </div>
     <div class="landing-hero">
       <div class="landing-hero-left">
@@ -53,6 +92,26 @@ def render(n_ead: int, n_models_active: int, n_models_total: int) -> None:
         <div class="landing-caption">개념도 — 실제 계산 구조·결과가 아님</div></div>
       </div>
     </div>
+  </div>
+</div>
+'''),
+        unsafe_allow_html=True,
+    )
+
+    # ── CTA 버튼 (부제 아래, 가치 카드 위) ──
+    st.markdown('<div class="landing-cta-anchor"></div>', unsafe_allow_html=True)
+    c1, c2, _sp = st.columns([1.1, 1.1, 2.8])
+    if c1.button("플랫폼 시작하기", type="primary", use_container_width=True,
+                 key="cta_start"):
+        _enter()
+    if c2.button("방법론 먼저 보기", use_container_width=True, key="cta_methods"):
+        _enter("방법론")
+
+    # ── 가치 카드 3열 + 상태 스트립 + 푸터 ──
+    st.markdown(
+        html_block(f'''
+<div class="landing-wrap landing-wrap-cont">
+  <div class="landing-inner landing-inner-cont">
     <div class="landing-values">{values}</div>
     <div class="landing-strip">현재 등록된 계산: 흡착 에너지
       <span class="mono">{n_ead}</span>건 · 지표 모델 활성
@@ -66,13 +125,3 @@ def render(n_ead: int, n_models_active: int, n_models_total: int) -> None:
 '''),
         unsafe_allow_html=True,
     )
-
-    # CTA 버튼 (landing-inner 위에 겹쳐 배치하기 위해 컨테이너 바로 아래 둔다)
-    c1, c2, _ = st.columns([1, 1, 3])
-    if c1.button("플랫폼 시작하기", type="primary", use_container_width=True):
-        st.session_state["entered"] = True
-        st.rerun()
-    if c2.button("방법론 먼저 보기", use_container_width=True):
-        st.session_state["entered"] = True
-        st.session_state["_nav"] = "방법론"
-        st.rerun()
