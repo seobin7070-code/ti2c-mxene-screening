@@ -1,0 +1,16 @@
+Program PWSCF v.7.0 starts
+     lattice parameter (alat)  =       6.0000  a.u.
+CELL_PARAMETERS (angstrom)
+   3.000000   0.000000   0.000000
+   0.000000   3.000000   0.000000
+   0.000000   0.000000  20.000000
+Begin final coordinates
+ATOMIC_POSITIONS (angstrom)
+Ti   0.000000   0.000000    9.500000
+Ti   1.500000   1.500000    9.500000
+C    0.000000   1.500000   11.000000
+Ti   0.000000   0.000000   12.500000
+Ti   1.500000   1.500000   12.500000
+O    0.750000   0.750000    8.200000
+O    0.750000   0.750000   13.800000
+End final coordinates

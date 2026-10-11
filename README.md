@@ -97,6 +97,20 @@ project/
 2. 데이터·QC 화면에서 CSV 업로드 — 미리보기·충돌 검사 후 확인하면 백업 뒤 반영됩니다.
 3. H₂O 행은 `calc_group=UNASSIGNED`이므로, 사용자가 CSV에서 짝 calc_group을 지정하면 즉시 반영됩니다.
 
+### Δd(표면 흐트러짐) 데이터 — QE 파일에서 자동 추출
+
+`data/geometry.csv`(컬럼 `surface,z_T_before,z_T_after,z_ref_before,z_ref_after`)가 채워지면
+조성 지도 Δd 탭·모델 정보 Δd 축·정방향 Δd 행·역방향 Pareto 의 Δd 축이 자동으로 켜집니다.
+Quantum ESPRESSO 출력(`.out`/`.pwo`)·구조(`.xsf`/`.xyz`) 파일이 있으면 다음으로 생성합니다:
+
+```bash
+python scripts/extract_delta_d.py --manifest scripts/delta_d_manifest.csv \
+    --files-dir data/qe --out data/geometry.csv
+```
+
+자세한 사용법은 `scripts/README.md`. 좌표를 못 읽으면 그 쌍은 건너뛰고(값 생성 안 함),
+`geometry.csv` 가 비어 있으면 Δd 는 '데이터 대기'로 표시됩니다.
+
 ## 현재 데이터 기대 동작
 
 - 복합체 **25종** E_ads 계산됨 (SET1 21종 + SET2 4종), 각 세트 안에서만.
@@ -105,7 +119,8 @@ project/
 - SET2는 H₂O 단독 분자가 없어 SET2 단독으로는 H₂O/P(CO₂/H₂O) 데이터 없음.
 - 반응성 경향(각 세트 내): SO₂ > H₂O > CO₂ 순으로 더 강하게 흡착하는 경향이 수치로 나타남.
 - 조성 지도: 조성 확정 표면만 마커 표시. Ti₂C_FH는 H→OH 환산 가정으로 F:OH 50:50(0,0.5,0.5) 좌표를 부여해 확정 처리.
-- GPR 활성 threshold=3. 현재 Eads(CO₂·H₂O·SO₂) 타깃은 활성, Δd는 geometry 데이터가 없어 비활성.
+- GPR 활성 threshold=3. 현재 Eads(CO₂·H₂O·SO₂) 타깃은 활성, Δd는 geometry 데이터가
+  입력되기 전까지 비활성(위 'Δd 데이터' 절대로 geometry.csv 를 채우면 활성화).
 
 ## 실행
 

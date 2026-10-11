@@ -938,8 +938,8 @@ def page_model():
         elif t == "Delta_d" and not geometry:
             C.empty_state("📐", "Δd 데이터 대기",
                           "Δd 는 SO₂ 흡착 전후 z 좌표(geometry)가 필요합니다. "
-                          "연구팀이 SO₂ 계산 구조를 확인해 data/geometry.csv 에 입력하면 "
-                          "자동으로 계산·표시됩니다 (명세 4.3·10).")
+                          "QE 출력 파일을 scripts/extract_delta_d.py 로 처리해 "
+                          "data/geometry.csv 를 생성하면 자동으로 계산·표시됩니다 (명세 4.3·10).")
         else:
             C.empty_state("📈", "LOOCV 데이터 부족", q.reason)
 
