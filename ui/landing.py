@@ -11,6 +11,7 @@ import streamlit as st
 from ui import branding as B
 from ui import illustrations as ILL
 from ui import tokens as T
+from ui.htmlutil import html_block
 
 
 def render(n_ead: int, n_models_active: int, n_models_total: int) -> None:
@@ -34,7 +35,7 @@ def render(n_ead: int, n_models_active: int, n_models_total: int) -> None:
     )
 
     st.markdown(
-        f'''
+        html_block(f'''
 <div class="landing-wrap">
   {ILL.molecule_pattern()}
   <div class="landing-inner">
@@ -42,32 +43,27 @@ def render(n_ead: int, n_models_active: int, n_models_total: int) -> None:
       <div class="lt-left">{tri}{wm}</div>
       <div class="landing-event">{B.EVENT}</div>
     </div>
-
     <div class="landing-hero">
       <div class="landing-hero-left">
         <div class="landing-title">{B.PROJECT_TITLE}</div>
-        <div class="landing-sub">DFT 계산과 Active Learning으로 CO₂ 선택 포집 표면 조성을
-        탐색합니다.</div>
+        <div class="landing-sub">DFT 계산과 Active Learning으로 CO₂ 선택 포집 표면 조성을 탐색합니다.</div>
       </div>
       <div class="landing-hero-right">
         <div>{ILL.landing_hero(animate=True)}
         <div class="landing-caption">개념도 — 실제 계산 구조·결과가 아님</div></div>
       </div>
     </div>
-
     <div class="landing-values">{values}</div>
-
     <div class="landing-strip">현재 등록된 계산: 흡착 에너지
       <span class="mono">{n_ead}</span>건 · 지표 모델 활성
       <span class="mono">{n_models_active}/{n_models_total}</span></div>
-
     <div class="landing-foot">
       {B.SCHOOL} · {B.DEPT} · {B.wordmark(on_dark=True, size=13)}
       {members_html}
     </div>
   </div>
 </div>
-''',
+'''),
         unsafe_allow_html=True,
     )
 

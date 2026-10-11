@@ -55,20 +55,41 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+# ── Markdown HTML 안전 패치 ──────────────────────────────────────────
+# st.markdown / DeltaGenerator.markdown 에 unsafe_allow_html=True 로 넘어오는
+# 모든 HTML 문자열에 html_block()을 적용해, 들여쓰기·빈 줄로 인한 Markdown
+# 코드블록화(=HTML이 글자로 노출)를 원천 차단한다. <style>/<pre>/<code> 는 보존.
+from ui.htmlutil import html_block as _html_block  # noqa: E402
+
+
+def _install_markdown_guard():
+    from streamlit.delta_generator import DeltaGenerator
+    if getattr(DeltaGenerator.markdown, "_html_guarded", False):
+        return
+    _orig = DeltaGenerator.markdown
+
+    def _guarded(self, body, *args, unsafe_allow_html=False, **kwargs):
+        if unsafe_allow_html and isinstance(body, str):
+            body = _html_block(body)
+        return _orig(self, body, *args, unsafe_allow_html=unsafe_allow_html, **kwargs)
+
+    _guarded._html_guarded = True
+    DeltaGenerator.markdown = _guarded
+
+
+_install_markdown_guard()
+
 theme.inject()
 
 # 발표 모드: 글자 1.15배·보조 설명 숨김·카드 간격 확대 (데이터는 불변)
 if st.session_state.get("present_mode"):
-    st.markdown(
-        "<style>"
+    C.render_html(st, "<style>"
         ".block-container { font-size:1.15em; }"
         ".block-container .hint, .block-container .ill-caption,"
         " .block-container [data-testid='stCaptionContainer'] { display:none !important; }"
         ".card, .kpi-eq, .scn-card, .cat-card { margin-bottom:24px !important; padding:24px !important; }"
         ".section-head { margin-top:28px !important; }"
-        "</style>",
-        unsafe_allow_html=True,
-    )
+        "</style>")
 
 
 # ───────────────────────── 데이터 로딩 (파일 mtime 기반 캐시) ─────────────────
@@ -176,12 +197,9 @@ def confirmed_composition_points() -> list[tuple[float, float, float]]:
 # ───────────────────────── 사이드바 (카테고리 내비) ─────────────────────────
 with st.sidebar:
     tri = ILL.composition_triangle(size=22, points=confirmed_composition_points())
-    st.markdown(
-        f'<div class="sidebar-logo-row">{tri}'
+    C.render_html(st, f'<div class="sidebar-logo-row">{tri}'
         f'<span class="sidebar-logo">{B.wordmark(on_dark=False, size=16)}</span></div>'
-        '<div class="sidebar-sub">Ti₂C MXene 표면 설계 플랫폼</div>',
-        unsafe_allow_html=True,
-    )
+        '<div class="sidebar-sub">Ti₂C MXene 표면 설계 플랫폼</div>')
     # 로고(홈) 클릭 → 시작 화면 복귀
     if st.button("← 시작 화면으로", use_container_width=True):
         st.session_state["entered"] = False
@@ -202,12 +220,9 @@ with st.sidebar:
 
     # 카테고리별 그룹 헤더 + 라디오
     for cat, pages in NAV.CATEGORIES.items():
-        st.markdown(
-            f'<div class="nav-group">{NAV.CAT_ICONS[cat]} &nbsp;{cat} '
+        C.render_html(st, f'<div class="nav-group">{NAV.CAT_ICONS[cat]} &nbsp;{cat} '
             f'<span style="font-weight:400;text-transform:none;letter-spacing:0">'
-            f'· {NAV.CAT_DESC[cat]}</span></div>',
-            unsafe_allow_html=True,
-        )
+            f'· {NAV.CAT_DESC[cat]}</span></div>')
         wkey = f"navradio_{cat}"
         cur = st.session_state["current_page"]
         idx = pages.index(cur) if cur in pages else None
@@ -220,8 +235,7 @@ with st.sidebar:
 
     page = st.session_state["current_page"]
 
-    st.markdown('<hr style="border:none;border-top:1px solid var(--ill-faint);margin:12px 0 4px">',
-                unsafe_allow_html=True)
+    C.render_html(st, '<hr style="border:none;border-top:1px solid var(--ill-faint);margin:12px 0 4px">')
 
     # 데이터 상태 진행바 3줄 (0/7)
     counts = metric_trainable_counts()
@@ -230,16 +244,13 @@ with st.sidebar:
         f'{C.progress_bar(counts[m], gpr.MIN_TRAINING)}</div>'
         for m in registry.ALL_METRICS
     )
-    st.markdown(
-        f'<div class="data-summary">'
+    C.render_html(st, f'<div class="data-summary">'
         f'<div class="kpi-label">데이터 상태</div>'
         f'<div style="margin:6px 0"><span class="mono">{len(registry.surfaces(entries))}</span> 표면 · '
         f'<span class="mono">{len(computed_ead_rows())}</span> E_ad 계산됨</div>'
         f'<div class="kpi-label" style="margin-top:10px">모델 학습 데이터 '
         f'<span class="hint">(계산된 표면 / {gpr.MIN_TRAINING})</span></div>'
-        f'{per_metric_html}</div>',
-        unsafe_allow_html=True,
-    )
+        f'{per_metric_html}</div>')
 
     # 발표 모드 토글
     st.session_state["present_mode"] = st.toggle(
@@ -248,14 +259,11 @@ with st.sidebar:
     )
 
     # 문서 영역
-    st.markdown(
-        '<div class="sidebar-docs">'
+    C.render_html(st, '<div class="sidebar-docs">'
         '<div class="kpi-label">문서</div>'
         '<a href="https://github.com/seobin7070-code/ti2c-mxene-screening" '
         'target="_blank" rel="noopener">· README (GitHub)</a>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
+        '</div>')
 
 
 # ═══════════════════════ Overview ═══════════════════════
@@ -293,8 +301,7 @@ def page_overview():
     C.breadcrumb("홈", "Overview")
 
     # ── 히어로 (네이비→틸 그라데이션 + 우측 SVG) ──
-    st.markdown(
-        '<div class="hero"><div class="hero-left">'
+    C.render_html(st, '<div class="hero"><div class="hero-left">'
         '<div class="hero-eyebrow">MXene 표면 설계 · AI-DFT 스크리닝</div>'
         '<div class="hero-title">배가스에서 유망한 Ti₂C MXene 표면 조성을<br>DFT와 AI로 탐색합니다</div>'
         '<div class="hero-desc">표면 말단기(-O/-F/-OH) 조성에 따라 CO₂·H₂O·SO₂ 흡착이 '
@@ -303,9 +310,7 @@ def page_overview():
         '모든 수치는 출처와 계산 조건(calc_group)까지 추적할 수 있습니다.</div>'
         '</div>'
         f'<div class="hero-right">{ILL.hero_mxene(animate=True)}</div>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
+        '</div>')
     # 히어로 CTA (Streamlit 버튼)
     cta1, cta2, _ = st.columns([1, 1, 2])
     if cta1.button("정방향 검증 시작", use_container_width=True):
@@ -319,48 +324,44 @@ def page_overview():
     C.section_head(ILL.icon_al(), "누가 어떻게 쓰나")
     st.caption("아래는 이 플랫폼이 상정한 사용 용도입니다 (도입 사례·성능 수치가 아닙니다).")
     sc1, sc2, sc3 = st.columns(3)
-    sc1.markdown(C.scenario_card(
+    C.render_html(sc1, C.scenario_card(
         ILL.icon_metrics(), "공정·제조 R&D", "석유화학·제조 엔지니어",
-        "내 배가스 조건에서 어떤 표면이 유망한지 결론 카드와 흡착 에너지로 빠르게 비교하도록 설계."),
-        unsafe_allow_html=True)
-    sc2.markdown(C.scenario_card(
+        "내 배가스 조건에서 어떤 표면이 유망한지 결론 카드와 흡착 에너지로 빠르게 비교하도록 설계."))
+    C.render_html(sc2, C.scenario_card(
         ILL.icon_gpr(), "소재 설계", "화학·소재 기업 연구원",
-        "조성 삼각도와 추천 후보로 합성 방향(말단기 비율)을 탐색하도록 설계."),
-        unsafe_allow_html=True)
-    sc3.markdown(C.scenario_card(
+        "조성 삼각도와 추천 후보로 합성 방향(말단기 비율)을 탐색하도록 설계."))
+    C.render_html(sc3, C.scenario_card(
         ILL.icon_dft(), "방법론·재현성", "대학·연구기관",
-        "계산 조건·출처·수식을 투명하게 공개해 재현성과 방법론을 확인하도록 설계."),
-        unsafe_allow_html=True)
+        "계산 조건·출처·수식을 투명하게 공개해 재현성과 방법론을 확인하도록 설계."))
 
     # ── 파이프라인 ──
     C.section_head(ILL.icon_gpr(), "분석 파이프라인")
-    st.markdown(ILL.pipeline(_pipeline_steps(rows, counts)), unsafe_allow_html=True)
+    C.render_html(st, ILL.pipeline(_pipeline_steps(rows, counts)))
 
     # ── KPI 4개 (높이 통일) ──
     C.section_head(ILL.icon_metrics(), "현재 데이터 상태")
     n_suspect = sum(1 for r in rows if r["suspect"])
     c1, c2, c3, c4 = st.columns(4)
-    c1.markdown(C.kpi_equal(
+    C.render_html(c1, C.kpi_equal(
         "등록된 표면",
-        f'<div class="kpi-value">{len(registry.surfaces(entries))}</div>'), unsafe_allow_html=True)
-    c2.markdown(C.kpi_equal(
+        f'<div class="kpi-value">{len(registry.surfaces(entries))}</div>'))
+    C.render_html(c2, C.kpi_equal(
         C.info_tooltip("E_ads", "계산 가능한 E_ads"),
-        f'<div class="kpi-value">{len(rows)}</div>'), unsafe_allow_html=True)
+        f'<div class="kpi-value">{len(rows)}</div>'))
     metric_bars = "".join(
         f'<div style="margin-top:8px"><div class="hint">{METRIC_LABEL[m]}</div>'
         f'{C.progress_bar(counts[m], gpr.MIN_TRAINING)}</div>'
         for m in registry.ALL_METRICS
     )
-    c3.markdown(C.kpi_equal(
+    C.render_html(c3, C.kpi_equal(
         "모델 학습 데이터",
         '<div class="hint" style="margin-top:2px">지표가 계산된 표면 수 / '
         f'{gpr.MIN_TRAINING}</div>',
-        bottom_html=metric_bars), unsafe_allow_html=True)
-    c4.markdown(C.kpi_equal(
+        bottom_html=metric_bars))
+    C.render_html(c4, C.kpi_equal(
         "데이터 품질",
         f'<div style="margin-top:8px">{C.quality_pill(n_suspect, bool(rows))}</div>'
-        '<div class="hint" style="margin-top:8px">마우스를 올리면 판정 기준이 표시됩니다.</div>'),
-        unsafe_allow_html=True)
+        '<div class="hint" style="margin-top:8px">마우스를 올리면 판정 기준이 표시됩니다.</div>'))
 
     # ── E_ad 막대차트 + PNG 다운로드 ──
     C.section_head(ILL.icon_metrics(), "계산 완료된 흡착 에너지")
@@ -419,10 +420,9 @@ def page_overview():
     C.card(cov_html + miss_html)
 
     # ── 방법론 한눈에 (연구기관용, 접이식) ──
-    st.markdown('<div id="방법론-한눈에"></div>', unsafe_allow_html=True)
+    C.render_html(st, '<div id="방법론-한눈에"></div>')
     with st.expander("방법론 한눈에 (소프트웨어 · 범함수 · 지표 정의)"):
-        st.markdown(
-            f'<div class="hint" style="line-height:1.9">'
+        C.render_html(st, f'<div class="hint" style="line-height:1.9">'
             f'<b>소프트웨어</b>: Quantum ESPRESSO<br>'
             f'<b>범함수 / 분산보정</b>: PBE-D3<br>'
             f'<b>단위 변환</b>: 1 Ry = {RY_TO_EV} eV<br><br>'
@@ -430,9 +430,7 @@ def page_overview():
             f'· {C.info_tooltip("E_ads", "E_ads")} = E_adsorbed − (E_clean + E_molecule)<br>'
             f'· {C.info_tooltip("Preference Index", "P(CO₂/H₂O)")} = E_ads(H₂O) − E_ads(CO₂)<br>'
             f'· {C.info_tooltip("Δd_surface", "Δd_surface")} = |mean(z_after) − mean(z_before)|'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
+            f'</div>')
         st.caption("서로 다른 calc_group의 값은 섞어서 계산하지 않습니다.")
 
     # ── 기능 둘러보기 (6개 카테고리 카드) ──
@@ -444,12 +442,9 @@ def page_overview():
     for col, cat in zip(cols, cats):
         first_page = NAV.CATEGORIES[cat][0]
         n_pages = len(NAV.CATEGORIES[cat])
-        col.markdown(
-            f'<div class="cat-card"><div class="cc-ic">{NAV.CAT_ICONS[cat]}</div>'
+        C.render_html(col, f'<div class="cat-card"><div class="cc-ic">{NAV.CAT_ICONS[cat]}</div>'
             f'<div class="cc-title">{cat}</div>'
-            f'<div class="cc-desc">{NAV.CAT_DESC[cat]} · {n_pages}개 페이지</div></div>',
-            unsafe_allow_html=True,
-        )
+            f'<div class="cc-desc">{NAV.CAT_DESC[cat]} · {n_pages}개 페이지</div></div>')
         if col.button(f"{cat} 열기", key=f"catbtn_{cat}", use_container_width=True):
             st.session_state["_nav"] = first_page
             st.rerun()
@@ -475,15 +470,11 @@ def page_forward():
         gas = st.selectbox("가스", GASES, format_func=lambda g: T.gas_meta(g)["label"])
         comp = comp_map.get(surface)
         # 선택한 표면의 말단기 구성 모식도
-        st.markdown(
-            f'<div class="card card-tight" style="margin-top:6px">'
+        C.render_html(st, f'<div class="card card-tight" style="margin-top:6px">'
             f'<div class="kpi-label">표면 말단기 구성</div>'
-            f'{ILL.surface_motif(comp)}</div>',
-            unsafe_allow_html=True,
-        )
+            f'{ILL.surface_motif(comp)}</div>')
         if comp is not None and not is_trainable(comp):
-            st.markdown(C.status_pill("pending", "조성 미확정 (OH 환산 확인 필요)"),
-                        unsafe_allow_html=True)
+            C.render_html(st, C.status_pill("pending", "조성 미확정 (OH 환산 확인 필요)"))
 
     with right:
         C.section_title(f"결과 — {T.gas_meta(gas)['label']} on {surface}")
@@ -506,7 +497,7 @@ def page_forward():
                   '가정이며 문헌 기준이 아님.</div>'
             )
             with st.expander("해석 배지 분류 기준 보기"):
-                st.markdown(C.interpretation_legend_html(), unsafe_allow_html=True)
+                C.render_html(st, C.interpretation_legend_html())
             if r.suspect:
                 C.notice("suspect", "의심값 경고",
                          "E_ad가 물리적으로 비현실적 범위([-3, +0.5] eV)를 벗어났습니다. 입력 데이터를 재확인하세요.")
@@ -526,28 +517,22 @@ def page_forward():
                             "calc_group": cc["calc_group"],
                         })
                 st.dataframe(pd.DataFrame(drows), width='stretch', hide_index=True)
-                st.markdown(
-                    f'<div class="hint" style="line-height:1.9">'
+                C.render_html(st, f'<div class="hint" style="line-height:1.9">'
                     f'<b>식:</b> E_ad = E_adsorbed − (E_clean + E_molecule)<br>'
                     f'= <span class="mono">{r.E_ad_Ry:.5f}</span> Ry '
                     f'= <span class="mono">{r.E_ad_Ry:.5f} × {RY_TO_EV}</span> '
                     f'= <span class="mono" style="color:{T.PRIMARY};font-weight:600">{r.E_ad_eV:.3f} eV</span><br>'
                     f'calc_group = <span class="mono">{r.calc_group}</span> (세 값 모두 동일 확인됨)'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
+                    f'</div>')
                 srcs = "".join(
                     C.source_chip(comps[k]["source_file"], comps[k]["calc_group"]) + " "
                     for k in ("E_adsorbed", "E_clean", "E_molecule") if comps.get(k)
                 )
-                st.markdown(f'<div style="margin-top:8px">{srcs}</div>', unsafe_allow_html=True)
+                C.render_html(st, f'<div style="margin-top:8px">{srcs}</div>')
 
         # 선택성 지표
-        st.markdown(
-            '<div class="section-title">선택성 지표 '
-            f'({C.info_tooltip("Preference Index", "Preference Index")})</div>',
-            unsafe_allow_html=True,
-        )
+        C.render_html(st, '<div class="section-title">선택성 지표 '
+            f'({C.info_tooltip("Preference Index", "Preference Index")})</div>')
         e_co2 = registry.compute_ad_for(entries, surface, "CO2")
         e_h2o = registry.compute_ad_for(entries, surface, "H2O")
         e_so2 = registry.compute_ad_for(entries, surface, "SO2")
@@ -588,14 +573,11 @@ def page_reverse():
     C.breadcrumb("설계", "역방향 추천")
     # 헤더에 삼각도 모티프 (현재 확정 조성 좌표를 점으로)
     tri = ILL.composition_triangle(size=30, points=confirmed_composition_points())
-    st.markdown(
-        f'<div style="display:flex;align-items:center;gap:10px">{tri}'
+    C.render_html(st, f'<div style="display:flex;align-items:center;gap:10px">{tri}'
         f'<div class="page-title">역방향 추천</div></div>'
         '<div class="page-sub">'
         f'{C.info_tooltip("GPR", "GPR")}이 조성 삼각 공간을 스캔해 최적 조성 후보와 '
-        f'{C.info_tooltip("Active Learning", "다음 계산 지점")}을 추천합니다.</div>',
-        unsafe_allow_html=True,
-    )
+        f'{C.info_tooltip("Active Learning", "다음 계산 지점")}을 추천합니다.</div>')
     C.notice("info", gpr.SIGMA_DISCLAIMER)
 
     # 지표별 모델 상태 — 세 지표(P 2종 + Δd)를 동일 로직으로 처리
@@ -640,11 +622,8 @@ def page_reverse():
         'fill="none" stroke="var(--ill-f)" stroke-width="2" stroke-dasharray="2 2"/></svg> '
         '조성 미확정</span></div>'
     )
-    st.markdown(
-        f'<div class="card">{ILL.coverage_triangle(cov_points)}{legend}'
-        f'<div class="ill-caption">개념도 — 실제 계산 구조·결과가 아님</div></div>',
-        unsafe_allow_html=True,
-    )
+    C.render_html(st, f'<div class="card">{ILL.coverage_triangle(cov_points)}{legend}'
+        f'<div class="ill-caption">개념도 — 실제 계산 구조·결과가 아님</div></div>')
 
     if not models:
         # 데이터 부족: 흐린 삼각도 미리보기 + 자물쇠 + 진행바 + "N개 더 필요"
@@ -659,8 +638,7 @@ def page_reverse():
             for m in registry.ALL_METRICS
         )
         C.section_head(ILL.icon_gpr(), "조성 공간 미리보기")
-        st.markdown(
-            '<div class="card" style="text-align:center">'
+        C.render_html(st, '<div class="card" style="text-align:center">'
             f'<div class="locked" style="display:inline-block">{blur_tri}</div>'
             f'<div style="margin-top:4px">{ILL.empty_locked()}</div>'
             f'<div style="font-weight:600">조성 스캔 잠김</div>'
@@ -668,9 +646,7 @@ def page_reverse():
             f'데이터가 <b>{need_more}개 더 필요</b>합니다. 각 지표가 계산된 표면이 '
             f'{gpr.MIN_TRAINING}개에 도달하면 해당 지표의 삼각 조성도와 추천이 활성화됩니다.</div>'
             f'<div style="max-width:420px;margin:0 auto">{bars}</div>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
+            '</div>')
         C.footer()
         return
 
@@ -700,12 +676,9 @@ def page_reverse():
                 f'<span class="hint">{k}:</span> <span class="mono">{v:.3f}</span>'
                 for k, v in cand.items() if k != "composition"
             )
-            cols[i].markdown(
-                f'<div class="card"><div class="kpi-label">후보 #{i+1}</div>'
+            C.render_html(cols[i], f'<div class="card"><div class="kpi-label">후보 #{i+1}</div>'
                 f'<div class="mono" style="font-size:15px;margin:6px 0;color:{T.PRIMARY}">[{comp_str}]</div>'
-                f'{metrics_html}</div>',
-                unsafe_allow_html=True,
-            )
+                f'{metrics_html}</div>')
         st.caption("활성화된 지표만 Pareto 목적함수에 포함됩니다.")
 
     # ── 사용자 우선순위 가중 정렬 (활성 지표 한정) ──
@@ -743,12 +716,9 @@ def page_reverse():
 # ═══════════════════════ 모델 품질 ═══════════════════════
 def page_quality():
     C.breadcrumb("모델", "모델 품질")
-    st.markdown(
-        '<div class="page-title">모델 품질</div>'
+    C.render_html(st, '<div class="page-title">모델 품질</div>'
         f'<div class="page-sub">{C.info_tooltip("LOOCV", "LOOCV")}로 실제 계산된 성능 수치만 '
-        '표시합니다. 추정값은 쓰지 않습니다.</div>',
-        unsafe_allow_html=True,
-    )
+        '표시합니다. 추정값은 쓰지 않습니다.</div>')
     # 지표 3개 각각 별도로 표시: ok면 KPI + parity plot, 아니면 빈 상태 카드
     for metric in registry.ALL_METRICS:
         pts = registry.trainable_points_for_metric(entries, comp_map, metric, geom_map)
@@ -760,10 +730,10 @@ def page_quality():
                               f"지표가 계산된 표면이 {gpr.MIN_TRAINING}개 이상이어야 합니다.")
             continue
         c1, c2, c3, c4 = st.columns(4)
-        c1.markdown(C.kpi_card("학습 데이터", str(q.n), "개"), unsafe_allow_html=True)
-        c2.markdown(C.kpi_card("MAE", f"{q.mae:.4f}", "eV"), unsafe_allow_html=True)
-        c3.markdown(C.kpi_card("RMSE", f"{q.rmse:.4f}", "eV"), unsafe_allow_html=True)
-        c4.markdown(C.kpi_card("R²", f"{q.r2:.4f}"), unsafe_allow_html=True)
+        C.render_html(c1, C.kpi_card("학습 데이터", str(q.n), "개"))
+        C.render_html(c2, C.kpi_card("MAE", f"{q.mae:.4f}", "eV"))
+        C.render_html(c3, C.kpi_card("RMSE", f"{q.rmse:.4f}", "eV"))
+        C.render_html(c4, C.kpi_card("R²", f"{q.r2:.4f}"))
         # 예측-실측 parity plot (LOOCV ok일 때만)
         st.plotly_chart(
             charts.parity_plot(q.y_true, q.y_pred, METRIC_LABEL[metric]),
@@ -778,8 +748,7 @@ def page_registry_view():
                      "모든 에너지 항목·출처·calc_group·상태를 확인하고, CSV로 새 데이터를 반영합니다.")
 
     # 데이터 신뢰 원칙 3줄 카드
-    st.markdown(
-        '<div class="trust-card">'
+    C.render_html(st, '<div class="trust-card">'
         '<div class="kpi-label" style="margin-bottom:6px">데이터 신뢰 원칙</div>'
         '<div class="trust-item"><span class="ti-ic">✓</span>'
         '<span>모든 값은 <span class="mono">data/energies.csv</span>에서 읽으며, 코드에 '
@@ -789,9 +758,7 @@ def page_registry_view():
         '함께 표시합니다.</span></div>'
         '<div class="trust-item"><span class="ti-ic">✓</span>'
         '<span>서로 다른 calc_group의 값은 섞지 않고 계산을 거부합니다.</span></div>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
+        '</div>')
 
     if load_errors:
         C.notice("suspect", "로드 중 거부된 행이 있습니다",
@@ -803,12 +770,9 @@ def page_registry_view():
     n_ok = sum(1 for e in entries if e.status == "ok")
     n_pending = sum(1 for e in entries if e.status == "pending")
     n_suspect = sum(1 for e in entries if e.status == "suspect")
-    st.markdown(
-        '<div style="display:flex;gap:8px;margin-bottom:12px">'
+    C.render_html(st, '<div style="display:flex;gap:8px;margin-bottom:12px">'
         + C.status_pill("ok", f"ok {n_ok}") + C.status_pill("pending", f"pending {n_pending}")
-        + C.status_pill("suspect", f"suspect {n_suspect}") + '</div>',
-        unsafe_allow_html=True,
-    )
+        + C.status_pill("suspect", f"suspect {n_suspect}") + '</div>')
 
     # 검색/필터
     C.section_title("에너지 항목")
@@ -832,13 +796,10 @@ def page_registry_view():
     if filtered:
         for cg in sorted({e.calc_group for e in filtered}):
             grp = [e for e in filtered if e.calc_group == cg]
-            st.markdown(
-                f'<div style="margin:14px 0 6px"><span class="pill" '
+            C.render_html(st, f'<div style="margin:14px 0 6px"><span class="pill" '
                 f'style="background:#F1F5F9;color:{T.TEXT};'
                 f'border-color:{T.BORDER}">calc_group {cg}</span> '
-                f'<span class="hint">{len(grp)}개 항목</span></div>',
-                unsafe_allow_html=True,
-            )
+                f'<span class="hint">{len(grp)}개 항목</span></div>')
             df = pd.DataFrame([{
                 "key": e.key, "role": e.role, "surface": e.surface, "gas": e.gas,
                 "energy_Ry": e.energy_Ry, "energy_eV": ry_to_ev(e.energy_Ry),
@@ -1051,11 +1012,8 @@ def page_competitive():
                     else C.status_pill("pending", "대기"))
             cells += f'<td style="padding:6px 10px;text-align:center">{pill}</td>'
         body += f"<tr>{cells}</tr>"
-    st.markdown(
-        f'<div class="card"><table style="width:100%;border-collapse:collapse;font-size:13px">'
-        f'{header}{body}</table></div>',
-        unsafe_allow_html=True,
-    )
+    C.render_html(st, f'<div class="card"><table style="width:100%;border-collapse:collapse;font-size:13px">'
+        f'{header}{body}</table></div>')
     C.footer()
 
 
@@ -1224,19 +1182,15 @@ def page_jobs():
     # 진행 현황 KPI
     C.section_head(ILL.icon_metrics(), "진행 현황")
     c1, c2, c3, c4 = st.columns(4)
-    c1.markdown(C.kpi_equal("완료", f'<div class="kpi-value">{summary["done"]}'
-                            f'<span class="kpi-unit">/ {summary["total"]}</span></div>'),
-                unsafe_allow_html=True)
-    c2.markdown(C.kpi_equal("대기(todo)", f'<div class="kpi-value">{summary["todo"]}</div>'),
-                unsafe_allow_html=True)
-    c3.markdown(C.kpi_equal("실행/실패",
-                f'<div class="kpi-value">{summary["running"]}/{summary["failed"]}</div>'),
-                unsafe_allow_html=True)
+    C.render_html(c1, C.kpi_equal("완료", f'<div class="kpi-value">{summary["done"]}'
+                            f'<span class="kpi-unit">/ {summary["total"]}</span></div>'))
+    C.render_html(c2, C.kpi_equal("대기(todo)", f'<div class="kpi-value">{summary["todo"]}</div>'))
+    C.render_html(c3, C.kpi_equal("실행/실패",
+                f'<div class="kpi-value">{summary["running"]}/{summary["failed"]}</div>'))
     eta_txt = ("측정 필요" if est["eta_h"] is None else f'{est["eta_h"]:.1f} h')
-    c4.markdown(C.kpi_equal("예상 잔여 시간",
+    C.render_html(c4, C.kpi_equal("예상 잔여 시간",
                 f'<div class="kpi-value" style="font-size:22px">{eta_txt}</div>'
-                '<div class="hint" style="margin-top:6px">입력된 wall_time 평균 × 남은 건수</div>'),
-                unsafe_allow_html=True)
+                '<div class="hint" style="margin-top:6px">입력된 wall_time 평균 × 남은 건수</div>'))
     if est["eta_h"] is None:
         st.caption("wall_time_h가 입력된 작업이 없어 예상 시간을 계산할 수 없습니다 (가상 수치 없음).")
 
@@ -1295,31 +1249,25 @@ def page_integrity():
     # 데이터 스냅샷 해시 (재현성)
     C.section_head(ILL.icon_metrics(), "데이터 스냅샷")
     h = DF.sha256_file(ENERGIES_CSV)
-    st.markdown(
-        f'<div class="card"><div class="kpi-label">energies.csv SHA-256</div>'
+    C.render_html(st, f'<div class="card"><div class="kpi-label">energies.csv SHA-256</div>'
         f'<div class="mono" style="font-size:12px;word-break:break-all;margin-top:4px">{h}</div>'
         '<div class="hint" style="margin-top:6px">이 해시로 데이터 스냅샷의 재현성을 '
-        '확인할 수 있습니다.</div></div>',
-        unsafe_allow_html=True,
-    )
+        '확인할 수 있습니다.</div></div>')
     C.footer()
 
 
 def page_roadmap():
     C.page_header_bc("모델", "잠금 해제 로드맵",
                      "각 지표 모델 활성화(유효 표면 7개)에 가장 가까운 다음 계산을 안내합니다.")
-    st.markdown(
-        f'<div class="card card-tight"><div class="kpi-label">정렬 규칙</div>'
-        f'<div class="hint" style="margin-top:4px;line-height:1.6">{ROADMAP.RULE_TEXT}</div></div>',
-        unsafe_allow_html=True,
-    )
+    C.render_html(st, f'<div class="card card-tight"><div class="kpi-label">정렬 규칙</div>'
+        f'<div class="hint" style="margin-top:4px;line-height:1.6">{ROADMAP.RULE_TEXT}</div></div>')
 
     ov = ROADMAP.roadmap_overview(entries, comp_map, METRIC_LABEL,
                                   need=gpr.MIN_TRAINING, geom_map=geom_map)
     for row in ov:
         C.section_head(ILL.icon_gpr(),
                        f'{row["label"]} — 현재 {row["current"]}/{row["need"]}')
-        st.markdown(C.progress_bar(row["current"], row["need"]), unsafe_allow_html=True)
+        C.render_html(st, C.progress_bar(row["current"], row["need"]))
         items = row["items"]
         if not items:
             C.notice("ok", "추가 계산 없이 활성화 가능하거나 이미 충분합니다.")
@@ -1357,25 +1305,19 @@ def page_methods():
     C.section_head(ILL.icon_dft(), "계산 조건 (보고서 계획값)")
     C.notice("pending", "아래는 보고서 계획값이며 실제 .out 값과 대조가 필요합니다.",
              "실제 출력은 '.out 파일 검사기'에서 파싱해 확인하세요.")
-    st.markdown(
-        '<div class="card"><div class="hint" style="line-height:1.9">'
+    C.render_html(st, '<div class="card"><div class="hint" style="line-height:1.9">'
         '· 소프트웨어: Quantum ESPRESSO v7.2<br>'
         '· 범함수 / 분산보정: PBE-D3<br>'
         '· ecutwfc / ecutrho: 보고서 계획값 (대조 필요)<br>'
         '· k-mesh: 3×3×1<br>'
         '· 슈퍼셀: 2×2<br>'
-        '· 진공: 20 Å</div></div>',
-        unsafe_allow_html=True,
-    )
+        '· 진공: 20 Å</div></div>')
 
     C.section_head(ILL.icon_al(), "조성 설계와 한계")
-    st.markdown(
-        '<div class="card"><div class="hint" style="line-height:1.8">'
+    C.render_html(st, '<div class="card"><div class="hint" style="line-height:1.8">'
         '· 7개 조성 설계: Scheffé 단체격자(simplex-lattice) + 중심점 구성<br>'
         '· 한계: N=7 수준에서 GPR 하이퍼파라미터가 불안정할 수 있으며, '
-        'σ는 보정된 불확실성이 아니라 참고용 상대 지표입니다.</div></div>',
-        unsafe_allow_html=True,
-    )
+        'σ는 보정된 불확실성이 아니라 참고용 상대 지표입니다.</div></div>')
 
     with st.expander("참고문헌 (보고서 수록 6건)"):
         st.caption("참고문헌은 보고서에 수록된 항목만 표시합니다. 플랫폼에서 임의로 생성하지 않습니다.")
@@ -1390,11 +1332,8 @@ def page_glossary():
     for term, desc in terms.items():
         if q and q.lower() not in term.lower() and q.lower() not in desc.lower():
             continue
-        st.markdown(
-            f'<div class="card card-tight"><b style="color:{T.PRIMARY}">{term}</b>'
-            f'<div class="hint" style="margin-top:4px;line-height:1.6">{desc}</div></div>',
-            unsafe_allow_html=True,
-        )
+        C.render_html(st, f'<div class="card card-tight"><b style="color:{T.PRIMARY}">{term}</b>'
+            f'<div class="hint" style="margin-top:4px;line-height:1.6">{desc}</div></div>')
         shown += 1
     if shown == 0:
         C.empty_state_svg(ILL.empty_waiting(), "검색 결과가 없습니다.", "다른 용어로 검색해 보세요.")
@@ -1416,15 +1355,12 @@ def page_report():
 
     # 미리보기 요약
     C.section_head(ILL.value_icon_source(), "리포트 요약")
-    st.markdown(
-        f'<div class="card"><div class="hint" style="line-height:1.8">'
+    C.render_html(st, f'<div class="card"><div class="hint" style="line-height:1.8">'
         f'· 생성 시각(UTC): <span class="mono">{d["generated_at"]}</span><br>'
         f'· 데이터 스냅샷 SHA-256: <span class="mono" style="font-size:11px">'
         f'{d["snapshot_sha256"]}</span><br>'
         f'· 에너지 항목 {len(d["energies"])}건 · 계산된 E_ad {len(ead)}건 · '
-        f'pending {len(pending)}건</div></div>',
-        unsafe_allow_html=True,
-    )
+        f'pending {len(pending)}건</div></div>')
 
     md = RP.to_markdown(d)
     html_doc = RP.to_html(d)
@@ -1455,31 +1391,24 @@ def page_report():
 def page_about():
     C.page_header_bc("자료", "팀·프로젝트 소개", "RE:ACT와 프로젝트 목표를 소개합니다.")
 
-    st.markdown(
-        f'<div class="card"><div style="display:flex;align-items:center;gap:10px">'
+    C.render_html(st, f'<div class="card"><div style="display:flex;align-items:center;gap:10px">'
         f'{ILL.composition_triangle(size=30)}'
         f'<span style="font-size:20px">{B.wordmark(on_dark=False, size=22)}</span></div>'
         f'<div class="hint" style="margin-top:8px;line-height:1.7">'
-        f'{B.SCHOOL} · {B.DEPT}<br>{B.EVENT}</div></div>',
-        unsafe_allow_html=True,
-    )
+        f'{B.SCHOOL} · {B.DEPT}<br>{B.EVENT}</div></div>')
 
     C.section_head(ILL.icon_al(), "프로젝트 목표와 가설")
-    st.markdown(
-        '<div class="card"><div class="hint" style="line-height:1.8">'
+    C.render_html(st, '<div class="card"><div class="hint" style="line-height:1.8">'
         '· 목표: Ti₂C MXene 표면 말단기(-O/-F/-OH) 조성에 따른 CO₂·H₂O·SO₂ 흡착 거동을 '
         'DFT로 산출하고, Active Learning으로 CO₂ 선택 포집에 유망한 조성을 탐색한다.<br>'
         '· 가설: 말단기 조성이 가스별 흡착 선택성과 표면 변형(Δd)에 영향을 미치며, '
         '조성 공간 탐색으로 선택성이 유리한 영역을 식별할 수 있다. (보고서 1.3절 기준)'
-        '</div></div>',
-        unsafe_allow_html=True,
-    )
+        '</div></div>')
 
     # 팀원: MEMBERS가 비어 있으면 섹션 자체를 숨김
     if B.has_members():
         C.section_head(ILL.value_icon_source(), "팀원")
-        st.markdown('<div class="card">' + " · ".join(B.MEMBERS) + "</div>",
-                    unsafe_allow_html=True)
+        C.render_html(st, '<div class="card">' + " · ".join(B.MEMBERS) + "</div>")
     C.footer()
 
 

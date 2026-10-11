@@ -12,6 +12,12 @@ from typing import Optional
 import streamlit as st
 
 from ui import tokens as T
+from ui.htmlutil import html_block
+
+
+def render_html(target, html_str: str) -> None:
+    """HTML을 Markdown 안전하게 정규화해 렌더한다 (target: st 또는 column)."""
+    target.markdown(html_block(html_str), unsafe_allow_html=True)
 
 
 def _hex_to_rgba(hex_color: str, alpha: float) -> str:
@@ -53,33 +59,27 @@ def source_chip(source_file: str, calc_group: str) -> str:
 
 # ── 페이지 헤더 ────────────────────────────────────────────────
 def page_header(title: str, subtitle: str):
-    st.markdown(
+    render_html(st,
         f'<div class="page-title">{html.escape(title)}</div>'
-        f'<div class="page-sub">{html.escape(subtitle)}</div>',
-        unsafe_allow_html=True,
-    )
+        f'<div class="page-sub">{html.escape(subtitle)}</div>')
 
 
 def section_title(text: str):
-    st.markdown(f'<div class="section-title">{html.escape(text)}</div>', unsafe_allow_html=True)
+    render_html(st, f'<div class="section-title">{html.escape(text)}</div>')
 
 
 def section_head(icon_svg: str, text: str):
     """섹션 제목 앞에 인라인 SVG 아이콘을 붙여 렌더한다."""
-    st.markdown(
+    render_html(st,
         f'<div class="section-head"><span class="sh-icon">{icon_svg}</span>'
-        f'<span class="sh-text">{html.escape(text)}</span></div>',
-        unsafe_allow_html=True,
-    )
+        f'<span class="sh-text">{html.escape(text)}</span></div>')
 
 
 def breadcrumb(category: str, page: str):
     """'카테고리 › 페이지' 브레드크럼."""
-    st.markdown(
+    render_html(st,
         f'<div class="breadcrumb"><span class="bc-cat">{html.escape(category)}</span>'
-        f'<span class="bc-sep">›</span>{html.escape(page)}</div>',
-        unsafe_allow_html=True,
-    )
+        f'<span class="bc-sep">›</span>{html.escape(page)}</div>')
 
 
 def page_header_bc(category: str, title: str, subtitle: str):
@@ -142,23 +142,19 @@ def notice(kind: str, title: str, body: str = ""):
     m = T.status_meta(kind)
     bg = _hex_to_rgba(m["color"], 0.08)
     body_html = f'<div class="hint" style="margin-top:4px">{body}</div>' if body else ""
-    st.markdown(
+    render_html(st,
         f'<div class="notice" style="background:{bg};border-color:{_hex_to_rgba(m["color"], 0.3)}">'
         f'<div class="ico" style="color:{m["color"]}">{m["icon"]}</div>'
         f'<div class="body"><b style="color:{m["color"]}">{html.escape(title)}</b>{body_html}</div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
+        f'</div>')
 
 
 def empty_state(icon: str, text: str, hint: str = ""):
     hint_html = f'<div class="hint" style="margin-top:4px">{html.escape(hint)}</div>' if hint else ""
-    st.markdown(
+    render_html(st,
         f'<div class="card"><div class="empty-state">'
         f'<div class="ico">{icon}</div><div>{html.escape(text)}</div>{hint_html}'
-        f'</div></div>',
-        unsafe_allow_html=True,
-    )
+        f'</div></div>')
 
 
 def card_open() -> str:
@@ -167,17 +163,15 @@ def card_open() -> str:
 
 def card(html_inner: str, tight: bool = False):
     cls = "card card-tight" if tight else "card"
-    st.markdown(f'<div class="{cls}">{html_inner}</div>', unsafe_allow_html=True)
+    render_html(st, f'<div class="{cls}">{html_inner}</div>')
 
 
 def footer():
     from ui import branding
-    st.markdown(
+    render_html(st,
         f'<div class="app-footer">{html.escape(branding.footer_text())} · '
         '본 플랫폼의 수치는 <span class="mono">data/energies.csv</span>에서 직접 산출됨'
-        '</div>',
-        unsafe_allow_html=True,
-    )
+        '</div>')
 
 
 # ── 계산값 기반 해석 배지 (문구는 값에서만 생성) ──────────────
@@ -283,11 +277,9 @@ def scenario_card(icon_svg: str, role: str, title: str, use: str) -> str:
 # ── 빈 상태 (일러스트 버전) ────────────────────────────────────
 def empty_state_svg(svg: str, text: str, hint: str = ""):
     hint_html = f'<div class="hint" style="margin-top:4px">{html.escape(hint)}</div>' if hint else ""
-    st.markdown(
+    render_html(st,
         f'<div class="card"><div class="empty-state">{svg}'
-        f'<div>{html.escape(text)}</div>{hint_html}</div></div>',
-        unsafe_allow_html=True,
-    )
+        f'<div>{html.escape(text)}</div>{hint_html}</div></div>')
 
 
 # ── 조성 커버리지 (보고서 정의 7개 조성 vs composition_map) ────
