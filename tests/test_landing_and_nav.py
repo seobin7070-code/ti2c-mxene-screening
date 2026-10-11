@@ -50,6 +50,33 @@ def test_nav_category_of():
     assert len(seen) == len(set(seen))  # 중복 없음
 
 
+def test_landing_cta_sets_entered(monkeypatch):
+    """'플랫폼 시작하기' 클릭(button True) 시 entered=True 로 전이한다."""
+    import ui.landing as L
+
+    class _Session(dict):
+        pass
+
+    session = _Session()
+    clicks = iter([True, False])  # 첫 버튼(시작하기)=True
+
+    class _Col:
+        def button(self, *a, **k):
+            return next(clicks)
+
+    def fake_columns(spec):
+        n = spec if isinstance(spec, int) else len(spec)
+        return [_Col() for _ in range(n)]
+
+    monkeypatch.setattr(L.st, "markdown", lambda *a, **k: None)
+    monkeypatch.setattr(L.st, "columns", fake_columns)
+    monkeypatch.setattr(L.st, "session_state", session)
+    monkeypatch.setattr(L.st, "rerun", lambda: None)
+
+    L.render(n_ead=4, n_models_active=0, n_models_total=3)
+    assert session.get("entered") is True
+
+
 def test_landing_strip_uses_passed_values(monkeypatch):
     """landing.render는 전달받은 수치만 쓰고 하드코딩하지 않는다."""
     import ui.landing as L

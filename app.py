@@ -71,12 +71,35 @@ if st.session_state.get("present_mode"):
     )
 
 
-# ───────────────────────── 데이터 로딩 ─────────────────────────
+# ───────────────────────── 데이터 로딩 (파일 mtime 기반 캐시) ─────────────────
+def _mtime(path: str) -> float:
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+
+@st.cache_data(show_spinner=False)
+def _load_energies_cached(path: str, mtime: float):
+    """energies.csv 로딩 캐시. mtime이 인자이므로 파일 변경 시 자동 무효화."""
+    res = load_energies(path)
+    return res.entries, res.errors
+
+
+@st.cache_data(show_spinner=False)
+def _load_comp_cached(path: str, mtime: float):
+    return load_composition_map(path)
+
+
+@st.cache_data(show_spinner=False)
+def _load_geom_cached(path: str, mtime: float):
+    return load_geometry(path)
+
+
 def get_entries() -> tuple[list[EnergyEntry], list]:
     if "uploaded_entries" in st.session_state:
         return st.session_state["uploaded_entries"], st.session_state.get("uploaded_errors", [])
-    res = load_energies(ENERGIES_CSV)
-    return res.entries, res.errors
+    return _load_energies_cached(ENERGIES_CSV, _mtime(ENERGIES_CSV))
 
 
 def fmt(x, nd=5):
@@ -84,8 +107,8 @@ def fmt(x, nd=5):
 
 
 entries, load_errors = get_entries()
-comp_map = load_composition_map(COMP_CSV)
-geom_map = load_geometry(GEOMETRY_CSV)
+comp_map = _load_comp_cached(COMP_CSV, _mtime(COMP_CSV))
+geom_map = _load_geom_cached(GEOMETRY_CSV, _mtime(GEOMETRY_CSV))
 
 
 # ───────────────────────── 파생 통계 (표시용, core 호출) ─────────────────────────
@@ -1175,6 +1198,7 @@ def page_out_inspector():
                                     c["source_file"])
                 # 3) 원자적 쓰기
                 DF.atomic_write(ENERGIES_CSV, "\n".join(lines) + "\n")
+                st.cache_data.clear()  # 파일 변경 → 캐시 무효화
                 C.notice("ok", f"{len(candidates)}건이 추가되었습니다.",
                          "백업과 감사 로그가 기록되었습니다. 새로고침 후 레지스트리에서 확인하세요.")
             except Exception as ex:
