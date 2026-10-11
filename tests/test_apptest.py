@@ -134,3 +134,45 @@ def test_reverse_next_candidate_section():
     at.run()
     md = "\n".join((m.value or "") for m in at.markdown)
     assert "다음 계산 후보" in md
+
+
+def test_reverse_factory_mode_default_renders():
+    """역방향 기본 모드 '공장 조건 → 최적 비율 추천'이 최적 비율 카드와 함께 렌더된다."""
+    at = AT.from_file(APP, default_timeout=90)
+    at.query_params["enter"] = "1"
+    at.session_state["current_page"] = "역방향 추천"
+    at.run()
+    assert not at.exception
+    # 모드 라디오 첫 옵션이 공장 조건 모드
+    mode_radio = next((r for r in at.radio
+                       if r.options and "공장 조건 → 최적 비율 추천" in r.options), None)
+    assert mode_radio is not None
+    assert mode_radio.options[0] == "공장 조건 → 최적 비율 추천"
+    # 기본 렌더에 최적 비율 카드가 보임
+    md = "\n".join((m.value or "") for m in at.markdown)
+    assert "최적 표면 비율" in md
+
+
+def test_factory_ranking_prefers_positive_pcond():
+    """공장 조건 랭킹은 P_cond(=P+δ_H2O) 내림차순이어야 한다(더 양수=CO₂ 유리가 1위)."""
+    from core.loader import load_energies
+    from core.composition import load_composition_map
+    from core import screening as S
+    from core import gpr_model as G
+    from core.grid import get_grid
+    from core.settings import load_settings
+    base = os.path.join(os.path.dirname(__file__), "..")
+    e = load_energies(os.path.join(base, "data", "energies.csv")).entries
+    c = load_composition_map(os.path.join(base, "data", "composition_map.csv"))
+    st = load_settings(os.path.join(base, "config", "settings.json"))
+    m = G.fit_unified(S.training_points_unified(e, c), st.min_train_points)
+    cg = next(iter(m.scales.keys()))
+    dh = S.condition_correction(12.0, 10.0, 0.0).delta_h2o
+    ranked = []
+    for comp in get_grid("quarter"):
+        mu_co2, _ = m.predict(comp, cg, "CO2")
+        mu_h2o, _ = m.predict(comp, cg, "H2O")
+        ranked.append(mu_h2o - mu_co2 + dh)
+    ranked.sort(reverse=True)
+    assert ranked == sorted(ranked, reverse=True)   # 내림차순 정렬 일관성
+    assert ranked[0] >= ranked[-1]

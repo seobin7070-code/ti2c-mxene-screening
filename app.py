@@ -483,11 +483,78 @@ def _reverse_pareto(model, cg, co2_raw, h2o_raw, so2_raw):
                     use_container_width=True)
 
 
+def _reverse_factory(model, cg, h2o_raw, so2_raw, co2_raw):
+    """공장 배가스 조건만 입력 → 그 조건에서 CO₂ 선택성이 가장 좋은 표면 비율 추천.
+
+    목표 E_ads 를 몰라도 되는 가장 쉬운 모드. 1/4-격자의 모든 조성을 조건 보정 P_cond
+    (= P(CO₂/H₂O) + δ_H2O) 로 평가해 '더 양수일수록 CO₂ 유리' 순으로 정렬한다.
+    분류 게이트 없이 항상 최적 후보를 제시한다(없을 일이 없음).
+    """
+    C.section_title("이 공장 조건에서 추천하는 표면 비율")
+    p_co2 = _parse_fraction(co2_raw, "mol%")
+    p_h2o = _parse_fraction(h2o_raw, "mol%")
+    delta_h2o = None
+    if p_co2 and p_co2 > 0 and p_h2o and p_h2o > 0:
+        cc = S.condition_correction(p_co2, p_h2o, 0.0)
+        delta_h2o = cc.delta_h2o
+
+    ranked = []
+    for comp in get_grid(settings.composition_grid):
+        mu_co2, s_co2 = model.predict(comp, cg, "CO2")
+        mu_h2o, s_h2o = model.predict(comp, cg, "H2O")
+        p = mu_h2o - mu_co2                         # P(CO₂/H₂O)
+        sig_p = G.sigma_P(s_co2, s_h2o)
+        p_cond = p + (delta_h2o if delta_h2o is not None else 0.0)
+        ranked.append({"composition": comp, "p_cond": p_cond, "p_raw": p,
+                       "sigma": sig_p, "mu_co2": mu_co2, "mu_h2o": mu_h2o})
+    # P_cond 가 더 양수(= CO₂ 유리)일수록 좋음 → 내림차순
+    ranked.sort(key=lambda d: d["p_cond"], reverse=True)
+    best = ranked[0]
+    note = ("온도·분압 1차 보정 적용" if delta_h2o is not None
+            else "CO₂·H₂O mol%를 0보다 크게 넣으면 조건 보정이 적용됩니다")
+
+    # ── 최적 비율을 크게 강조 ──
+    bc = best["composition"]
+    pct = lambda v: f"{round(v*100)}%"
+    st.markdown(
+        f'<div class="card" style="border-left:4px solid {T.PRIMARY}">'
+        f'<div class="kpi-label">최적 표면 비율 (CO₂ 선택성 최대)</div>'
+        f'<div class="hero-value" style="color:{T.PRIMARY};font-size:30px">'
+        f'–O {pct(bc[0])} · –F {pct(bc[1])} · –OH {pct(bc[2])}</div>'
+        f'<div class="hint" style="margin-top:6px">조건 보정 CO₂ 선호도 '
+        f'P_cond = <b>{best["p_cond"]:+.3f} eV</b> '
+        f'(더 양수일수록 CO₂가 H₂O보다 유리) · σ(P) {best["sigma"]:.3f} eV</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── 차선책 (2~5위) ──
+    rest = ranked[1:5]
+    if rest:
+        items = ""
+        for i, r in enumerate(rest, 2):
+            c = r["composition"]
+            items += (f'<div style="padding:8px 0;border-bottom:1px solid {T.BORDER}">'
+                      f'<b>#{i}</b> <span class="mono">–O {pct(c[0])} · –F {pct(c[1])} · '
+                      f'–OH {pct(c[2])}</span> '
+                      f'<span class="hint">P_cond {r["p_cond"]:+.3f} eV · σ {r["sigma"]:.3f}</span></div>')
+        C.card(f'<div class="kpi-label">차선 후보</div>{items}')
+    st.caption(f"1/4-격자 조성을 이 공장 조건으로 평가해 CO₂ 선호도가 큰 순으로 정렬했습니다. "
+               f"{note}. " + G.SIGMA_NOTE)
+
+    # ── 조성 지도에 상위 후보 표시 ──
+    markers = [{"xO": r["composition"][0], "xF": r["composition"][1],
+                "xOH": r["composition"][2], "kind": "computed",
+                "value": r["p_cond"], "label": f"#{i} (P_cond {r['p_cond']:+.3f})"}
+               for i, r in enumerate(ranked[:5], 1)]
+    st.plotly_chart(charts.composition_map(markers, "P_cond(CO₂/H₂O)", "eV"),
+                    use_container_width=True)
+
+
 def page_reverse():
-    C.breadcrumb("설계", "GPR 예측 및 역방향 추천")
-    C.page_header("GPR 예측 및 역방향 추천",
-                  "조성·세트·가스를 입력으로 학습한 GPR로 흡착 에너지를 예측하고, "
-                  "목표 흡착 에너지에 가장 가까운 조성을 추천합니다.")
+    C.breadcrumb("설계", "역방향 추천 — 공장 조건으로 최적 비율 찾기")
+    C.page_header("역방향 추천",
+                  "공장 배가스 조건(H₂O·SO₂·CO₂)을 입력하면 그 조건에서 CO₂를 가장 잘 잡는 "
+                  "표면 비율(–O/–F/–OH)을 추천합니다. (고급: 목표 E_ads·Pareto 모드도 선택 가능)")
     C.scope_banner()
 
     model, n_train = get_unified_model()
@@ -516,10 +583,18 @@ def page_reverse():
         C.section_title("예측 조건")
         cg = st.selectbox("데이터 세트 (스케일 기준)", list(model.scales.keys()),
                           help="세트마다 셀 스케일이 다르므로 예측 기준 세트를 지정합니다.")
-        mode = st.radio("모드", ["조성 → 예측", "목표 흡착 에너지 → 조성 추천",
+        mode = st.radio("모드", ["공장 조건 → 최적 비율 추천", "조성 → 예측",
+                                "목표 흡착 에너지 → 조성 추천",
                                 "우선 검토 후보 탐색 (Pareto)"])
 
-        if mode == "조성 → 예측":
+        if mode == "공장 조건 → 최적 비율 추천":
+            st.caption("우리 공장 배가스의 대략적인 조성(mol%)만 넣으세요. "
+                       "그 조건에서 CO₂를 가장 잘 잡는 표면 비율을 추천합니다.")
+            fc = st.columns(3)
+            fac_co2 = fc[0].text_input("CO₂ mol%", "12", key="fac_co2")
+            fac_h2o = fc[1].text_input("H₂O mol%", "10", key="fac_h2o")
+            fac_so2 = fc[2].text_input("SO₂ mol%", "0.05", key="fac_so2")
+        elif mode == "조성 → 예측":
             xF = st.slider("xF (–F)", 0.0, 1.0, 0.5, 0.05)
             xO = st.slider("xO (–O)", 0.0, 1.0, 0.5, 0.05)
             xOH = st.slider("xOH (–OH)", 0.0, 1.0, 0.0, 0.05)
@@ -544,7 +619,9 @@ def page_reverse():
             tgt_h2o = st.number_input("목표 E_ads(H₂O)", value=-0.04, step=0.01, format="%.3f")
 
     with right:
-        if mode == "우선 검토 후보 탐색 (Pareto)":
+        if mode == "공장 조건 → 최적 비율 추천":
+            _reverse_factory(model, cg, fac_h2o, fac_so2, fac_co2)
+        elif mode == "우선 검토 후보 탐색 (Pareto)":
             _reverse_pareto(model, cg, rev_co2, rev_h2o, rev_so2)
         elif mode == "조성 → 예측":
             C.section_title(f"GPR 예측 — {cg} 기준")
