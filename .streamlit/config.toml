@@ -12,3 +12,7 @@ headless = true
 
 [browser]
 gatherUsageStats = false
+
+[client]
+# 우측 상단 Deploy 버튼/툴바를 최소화해 숨긴다
+toolbarMode = "minimal"

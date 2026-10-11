@@ -20,12 +20,14 @@ from core.composition import load_composition_map, is_trainable
 from core import registry
 from core import gpr
 from core.quality import loocv
-from core.export import df_to_csv_bytes, ensure_provenance_columns
+from core.export import df_to_csv_bytes, ensure_provenance_columns, fig_to_png_bytes
 
 from ui import theme
 from ui import components as C
 from ui import charts
 from ui import tokens as T
+from ui import illustrations as ILL
+from ui import glossary
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(HERE, "data")
@@ -99,16 +101,31 @@ METRIC_LABEL = {
 }
 
 
+def confirmed_composition_points() -> list[tuple[float, float, float]]:
+    """조성 확정 표면들의 [xO,xF,xOH] 좌표 (삼각도 모티프에 점으로 표시)."""
+    pts = []
+    for c in comp_map.values():
+        if c.confirmed and c.xO is not None and c.xF is not None and c.xOH is not None:
+            pts.append((c.xO, c.xF, c.xOH))
+    return pts
+
+
 # ───────────────────────── 사이드바 ─────────────────────────
 with st.sidebar:
+    tri = ILL.composition_triangle(size=24, points=confirmed_composition_points())
     st.markdown(
-        '<div class="sidebar-logo">⬡ Ti₂C MXene 스크리닝</div>'
-        '<div class="sidebar-sub">AI-DFT 흡착 플랫폼</div>',
+        f'<div class="sidebar-logo-row">{tri}'
+        f'<span class="sidebar-logo">Ti₂C MXene 스크리닝</span></div>'
+        '<div class="sidebar-sub">AI-DFT 흡착 스크리닝 플랫폼</div>',
         unsafe_allow_html=True,
     )
+    _nav_options = ["Overview", "정방향 검증", "역방향 추천", "모델 품질", "데이터 레지스트리"]
+    _nav_default = st.session_state.pop("_nav", None)
+    _nav_index = _nav_options.index(_nav_default) if _nav_default in _nav_options else 0
     page = st.radio(
         "내비게이션",
-        ["Overview", "정방향 검증", "역방향 추천", "모델 품질", "데이터 레지스트리"],
+        _nav_options,
+        index=_nav_index,
         label_visibility="collapsed",
     )
 
@@ -133,76 +150,192 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
+    # 문서 영역
+    st.markdown(
+        '<div class="sidebar-docs">'
+        '<div class="kpi-label">문서</div>'
+        '<a href="#방법론-한눈에">· 방법론 보기 (Overview 하단)</a>'
+        '<a href="https://github.com/seobin7070-code/ti2c-mxene-screening" '
+        'target="_blank" rel="noopener">· README (GitHub)</a>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
 
 # ═══════════════════════ Overview ═══════════════════════
+def _pipeline_steps(rows, counts):
+    """파이프라인 4단계 상태를 데이터에서 계산한다 (꾸밈 없음)."""
+    has_energy = len(entries) > 0
+    has_ead = len(rows) > 0
+    gpr_active = any(counts[m] >= gpr.MIN_TRAINING for m in registry.ALL_METRICS)
+
+    def st_pair(done, waiting_ok=True):
+        if done:
+            return "ok", "완료"
+        return ("pending", "대기") if waiting_ok else ("pending", "대기")
+
+    s1 = ("ok", "완료") if has_energy else ("pending", "대기")
+    s2 = ("ok", "완료") if has_ead else ("pending", "대기")
+    s3 = ("ok", "완료") if gpr_active else ("pending", "잠금")
+    s4 = ("ok", "완료") if gpr_active else ("pending", "잠금")
+    return [
+        {"title": "DFT 계산", "desc": "Quantum ESPRESSO · PBE-D3",
+         "status": s1[0], "status_label": s1[1], "icon_svg": ILL.icon_dft()},
+        {"title": "에너지·지표 산출", "desc": "E_ads · P · Δd",
+         "status": s2[0], "status_label": s2[1], "icon_svg": ILL.icon_metrics()},
+        {"title": "GPR 조성 공간 학습", "desc": "조성 → 지표 예측",
+         "status": s3[0], "status_label": s3[1], "icon_svg": ILL.icon_gpr()},
+        {"title": "Active Learning 추천", "desc": "다음 계산 지점 제안",
+         "status": s4[0], "status_label": s4[1], "icon_svg": ILL.icon_al()},
+    ]
+
+
 def page_overview():
-    C.page_header(
-        "Overview",
-        "Ti₂C MXene 표면 조성에 따른 배가스 흡착을 DFT로 산출하고 AI로 최적 조성을 추천합니다.",
-    )
-
-    # 히어로 가치 제안
-    C.card(
-        '<div style="font-size:16px;font-weight:600;color:' + T.PRIMARY + '">'
-        '표면 말단기(-O/-F/-OH) 조성을 바꾸면 CO₂·H₂O·SO₂ 흡착이 어떻게 달라질까?</div>'
-        '<div class="hint" style="margin-top:6px;font-size:13px">'
-        'DFT 계산 결과로부터 흡착 에너지와 선택성 지표를 투명하게 산출하고, '
-        'GPR 기반 Active Learning으로 조성 공간을 스캔해 다음에 계산할 지점을 제안합니다. '
-        '모든 수치는 출처(source_file)와 calc_group까지 추적 가능합니다.</div>'
-    )
-
-    # KPI 4개
     rows = computed_ead_rows()
     counts = metric_trainable_counts()
-    n_suspect = sum(1 for r in rows if r["suspect"])
-    quality_status = "suspect" if n_suspect else ("ok" if rows else "pending")
-    quality_text = (f"{n_suspect}건 의심" if n_suspect
-                    else ("정상" if rows else "데이터 없음"))
 
+    # ── 히어로 (네이비→틸 그라데이션 + 우측 SVG) ──
+    st.markdown(
+        '<div class="hero"><div class="hero-left">'
+        '<div class="hero-eyebrow">MXene 표면 설계 · AI-DFT 스크리닝</div>'
+        '<div class="hero-title">배가스에서 유망한 Ti₂C MXene 표면 조성을<br>DFT와 AI로 탐색합니다</div>'
+        '<div class="hero-desc">표면 말단기(-O/-F/-OH) 조성에 따라 CO₂·H₂O·SO₂ 흡착이 '
+        '어떻게 달라지는지 DFT 계산 결과로부터 투명하게 산출하고, GPR 기반 Active Learning으로 '
+        '조성 공간을 스캔해 다음에 계산할 지점을 제안하도록 설계되었습니다. '
+        '모든 수치는 출처와 계산 조건(calc_group)까지 추적할 수 있습니다.</div>'
+        '</div>'
+        f'<div class="hero-right">{ILL.hero_mxene(animate=True)}</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    # 히어로 CTA (Streamlit 버튼)
+    cta1, cta2, _ = st.columns([1, 1, 2])
+    if cta1.button("정방향 검증 시작", use_container_width=True):
+        st.session_state["_nav"] = "정방향 검증"
+        st.rerun()
+    if cta2.button("데이터 레지스트리 보기", use_container_width=True):
+        st.session_state["_nav"] = "데이터 레지스트리"
+        st.rerun()
+
+    # ── 누가 어떻게 쓰나 (3 시나리오) ──
+    C.section_head(ILL.icon_al(), "누가 어떻게 쓰나")
+    st.caption("아래는 이 플랫폼이 상정한 사용 용도입니다 (도입 사례·성능 수치가 아닙니다).")
+    sc1, sc2, sc3 = st.columns(3)
+    sc1.markdown(C.scenario_card(
+        ILL.icon_metrics(), "공정·제조 R&D", "석유화학·제조 엔지니어",
+        "내 배가스 조건에서 어떤 표면이 유망한지 결론 카드와 흡착 에너지로 빠르게 비교하도록 설계."),
+        unsafe_allow_html=True)
+    sc2.markdown(C.scenario_card(
+        ILL.icon_gpr(), "소재 설계", "화학·소재 기업 연구원",
+        "조성 삼각도와 추천 후보로 합성 방향(말단기 비율)을 탐색하도록 설계."),
+        unsafe_allow_html=True)
+    sc3.markdown(C.scenario_card(
+        ILL.icon_dft(), "방법론·재현성", "대학·연구기관",
+        "계산 조건·출처·수식을 투명하게 공개해 재현성과 방법론을 확인하도록 설계."),
+        unsafe_allow_html=True)
+
+    # ── 파이프라인 ──
+    C.section_head(ILL.icon_gpr(), "분석 파이프라인")
+    st.markdown(ILL.pipeline(_pipeline_steps(rows, counts)), unsafe_allow_html=True)
+
+    # ── KPI 4개 (높이 통일) ──
+    C.section_head(ILL.icon_metrics(), "현재 데이터 상태")
+    n_suspect = sum(1 for r in rows if r["suspect"])
     c1, c2, c3, c4 = st.columns(4)
-    c1.markdown(C.kpi_card("등록된 표면", str(len(registry.surfaces(entries)))), unsafe_allow_html=True)
-    c2.markdown(C.kpi_card("계산 가능한 E_ad", str(len(rows))), unsafe_allow_html=True)
-    # 3번째 카드: 지표별 학습 데이터(지표가 계산된 표면 수 / 7)
+    c1.markdown(C.kpi_equal(
+        "등록된 표면",
+        f'<div class="kpi-value">{len(registry.surfaces(entries))}</div>'), unsafe_allow_html=True)
+    c2.markdown(C.kpi_equal(
+        C.info_tooltip("E_ads", "계산 가능한 E_ads"),
+        f'<div class="kpi-value">{len(rows)}</div>'), unsafe_allow_html=True)
     metric_bars = "".join(
         f'<div style="margin-top:8px"><div class="hint">{METRIC_LABEL[m]}</div>'
         f'{C.progress_bar(counts[m], gpr.MIN_TRAINING)}</div>'
         for m in registry.ALL_METRICS
     )
-    c3.markdown(
-        '<div class="card card-tight"><div class="kpi-label">모델 학습 데이터</div>'
+    c3.markdown(C.kpi_equal(
+        "모델 학습 데이터",
         '<div class="hint" style="margin-top:2px">지표가 계산된 표면 수 / '
-        f'{gpr.MIN_TRAINING}</div>{metric_bars}</div>',
-        unsafe_allow_html=True,
-    )
-    c4.markdown(
-        '<div class="card card-tight"><div class="kpi-label">데이터 품질</div>'
-        f'<div style="margin-top:8px">{C.status_pill(quality_status, quality_text)}</div></div>',
-        unsafe_allow_html=True,
-    )
+        f'{gpr.MIN_TRAINING}</div>',
+        bottom_html=metric_bars), unsafe_allow_html=True)
+    c4.markdown(C.kpi_equal(
+        "데이터 품질",
+        f'<div style="margin-top:8px">{C.quality_pill(n_suspect, bool(rows))}</div>'
+        '<div class="hint" style="margin-top:8px">마우스를 올리면 판정 기준이 표시됩니다.</div>'),
+        unsafe_allow_html=True)
 
-    # E_ad 요약 막대차트
-    C.section_title("계산 완료된 흡착 에너지")
+    # ── E_ad 막대차트 + PNG 다운로드 ──
+    C.section_head(ILL.icon_metrics(), "계산 완료된 흡착 에너지")
     if rows:
         st.plotly_chart(charts.ead_bar(rows), use_container_width=True)
+        try:
+            png = fig_to_png_bytes(charts.ead_bar_png(rows))
+            st.download_button("차트 PNG 다운로드", data=png,
+                               file_name="ead_chart.png", mime="image/png")
+        except Exception:
+            st.caption("PNG 내보내기를 사용할 수 없습니다 (kaleido 미설치).")
     else:
-        C.empty_state("📊", "아직 계산 가능한 E_ad가 없습니다.",
-                      "데이터 레지스트리에서 clean·molecule·adsorbed 에너지를 추가하세요.")
+        C.empty_state_svg(ILL.empty_chart(), "아직 계산 가능한 E_ad가 없습니다.",
+                          "데이터 레지스트리에서 clean·molecule·adsorbed 에너지를 추가하세요.")
 
-    # 다음에 필요한 계산 (누락 체크리스트, 우선순위)
-    C.section_title("다음에 필요한 계산")
+    # ── 다음에 필요한 계산 (조성 커버리지 우선) ──
+    C.section_head(ILL.icon_dft(), "다음에 필요한 계산")
+    coverage = C.composition_coverage(comp_map)
+    not_covered = [c for c in coverage if not c["covered"]]
+    cov_html = (
+        f'<div style="padding:4px 0 8px;border-bottom:1px solid {T.BORDER};margin-bottom:6px">'
+        f'<b style="font-size:13px">조성 커버리지</b> '
+        f'<span class="hint">보고서 정의 7개 조성 중 '
+        f'{len(coverage) - len(not_covered)}/{len(coverage)} 확정</span></div>'
+    )
+    if not_covered:
+        cov_html += "".join(
+            f'<div style="display:flex;gap:10px;padding:6px 0">'
+            f'{C.status_pill("pending", "표면 계산 필요")}'
+            f'<span style="font-size:13px"><b>{c["formula"]}</b> '
+            f'<span class="hint">({c["name"]})</span></span></div>'
+            for c in not_covered
+        )
+    else:
+        cov_html += ('<div class="hint" style="padding:6px 0">보고서 정의 7개 조성이 모두 '
+                     '확정되었습니다.</div>')
+
+    # 에너지 누락 체크리스트 (전역 우선)
     missing = registry.missing_checklist(entries)
-    if missing:
-        # 전역(단독 분자) 누락을 우선순위 상위로
-        missing_sorted = sorted(missing, key=lambda m: 0 if m.scope == "전역" else 1)
-        items_html = "".join(
-            f'<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid {T.BORDER}">'
+    missing_sorted = sorted(missing, key=lambda m: 0 if m.scope == "전역" else 1)
+    miss_html = (
+        f'<div style="padding:10px 0 8px;border-top:1px solid {T.BORDER};'
+        f'border-bottom:1px solid {T.BORDER};margin:8px 0 6px">'
+        f'<b style="font-size:13px">에너지 데이터 누락</b></div>'
+    )
+    if missing_sorted:
+        miss_html += "".join(
+            f'<div style="display:flex;gap:10px;padding:6px 0">'
             f'{C.status_pill("pending", "필요")}'
             f'<span style="font-size:13px"><b>{m.scope}</b> — {m.detail}</span></div>'
             for m in missing_sorted[:10]
         )
-        C.card(items_html)
     else:
-        C.notice("ok", "누락 항목이 없습니다.", "모든 조합의 기준 에너지가 준비되어 있습니다.")
+        miss_html += '<div class="hint" style="padding:6px 0">누락 항목 없음.</div>'
+
+    C.card(cov_html + miss_html)
+
+    # ── 방법론 한눈에 (연구기관용, 접이식) ──
+    st.markdown('<div id="방법론-한눈에"></div>', unsafe_allow_html=True)
+    with st.expander("방법론 한눈에 (소프트웨어 · 범함수 · 지표 정의)"):
+        st.markdown(
+            f'<div class="hint" style="line-height:1.9">'
+            f'<b>소프트웨어</b>: Quantum ESPRESSO<br>'
+            f'<b>범함수 / 분산보정</b>: PBE-D3<br>'
+            f'<b>단위 변환</b>: 1 Ry = {RY_TO_EV} eV<br><br>'
+            f'<b>지표 정의</b><br>'
+            f'· {C.info_tooltip("E_ads", "E_ads")} = E_adsorbed − (E_clean + E_molecule)<br>'
+            f'· {C.info_tooltip("Preference Index", "P(CO₂/H₂O)")} = E_ads(H₂O) − E_ads(CO₂)<br>'
+            f'· {C.info_tooltip("Δd_surface", "Δd_surface")} = |mean(z_after) − mean(z_before)|'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption("서로 다른 calc_group의 값은 섞어서 계산하지 않습니다.")
 
     C.footer()
 
@@ -224,6 +357,13 @@ def page_forward():
         surface = st.selectbox("표면", surf_list)
         gas = st.selectbox("가스", GASES, format_func=lambda g: T.gas_meta(g)["label"])
         comp = comp_map.get(surface)
+        # 선택한 표면의 말단기 구성 모식도
+        st.markdown(
+            f'<div class="card card-tight" style="margin-top:6px">'
+            f'<div class="kpi-label">표면 말단기 구성</div>'
+            f'{ILL.surface_motif(comp)}</div>',
+            unsafe_allow_html=True,
+        )
         if comp is not None and not is_trainable(comp):
             st.markdown(C.status_pill("pending", "조성 미확정 (OH 환산 확인 필요)"),
                         unsafe_allow_html=True)
@@ -286,7 +426,11 @@ def page_forward():
                 st.markdown(f'<div style="margin-top:8px">{srcs}</div>', unsafe_allow_html=True)
 
         # 선택성 지표
-        C.section_title("선택성 지표 (Preference Index)")
+        st.markdown(
+            '<div class="section-title">선택성 지표 '
+            f'({C.info_tooltip("Preference Index", "Preference Index")})</div>',
+            unsafe_allow_html=True,
+        )
         e_co2 = registry.compute_ad_for(entries, surface, "CO2")
         e_h2o = registry.compute_ad_for(entries, surface, "H2O")
         e_so2 = registry.compute_ad_for(entries, surface, "SO2")
@@ -324,8 +468,16 @@ def page_forward():
 
 # ═══════════════════════ 역방향 추천 ═══════════════════════
 def page_reverse():
-    C.page_header("역방향 추천",
-                  "GPR이 조성 삼각 공간을 스캔해 최적 조성 후보와 다음 계산 지점을 추천합니다.")
+    # 헤더에 삼각도 모티프 (현재 확정 조성 좌표를 점으로)
+    tri = ILL.composition_triangle(size=30, points=confirmed_composition_points())
+    st.markdown(
+        f'<div style="display:flex;align-items:center;gap:10px">{tri}'
+        f'<div class="page-title">역방향 추천</div></div>'
+        '<div class="page-sub">'
+        f'{C.info_tooltip("GPR", "GPR")}이 조성 삼각 공간을 스캔해 최적 조성 후보와 '
+        f'{C.info_tooltip("Active Learning", "다음 계산 지점")}을 추천합니다.</div>',
+        unsafe_allow_html=True,
+    )
     C.notice("info", gpr.SIGMA_DISCLAIMER)
 
     # 지표별 모델 상태 — 세 지표(P 2종 + Δd)를 동일 로직으로 처리
@@ -348,22 +500,28 @@ def page_reverse():
     C.card(status_html)
 
     if not models:
-        # 데이터 부족: 흐림 미리보기 + 잠금. 지표별 진행바를 함께 노출.
+        # 데이터 부족: 흐린 삼각도 미리보기 + 자물쇠 + 진행바 + "N개 더 필요"
         counts = metric_trainable_counts()
+        best = max(counts.values()) if counts else 0
+        need_more = max(0, gpr.MIN_TRAINING - best)
+        blur_tri = ILL.composition_triangle(size=120, points=confirmed_composition_points())
         bars = "".join(
-            f'<div style="margin-top:8px;text-align:left"><div class="hint">{METRIC_LABEL[m]}</div>'
+            f'<div style="margin-top:8px;text-align:left"><div class="hint">{METRIC_LABEL[m]} '
+            f'<span class="hint">({max(0, gpr.MIN_TRAINING - counts[m])}개 더 필요)</span></div>'
             f'{C.progress_bar(counts[m], gpr.MIN_TRAINING)}</div>'
             for m in registry.ALL_METRICS
         )
-        C.section_title("조성 공간 미리보기")
+        C.section_head(ILL.icon_gpr(), "조성 공간 미리보기")
         st.markdown(
-            '<div class="card"><div class="lock-overlay">'
-            f'<div style="font-size:28px">🔒</div>'
-            f'<div style="font-weight:600;margin-top:6px">조성 스캔 잠김</div>'
-            f'<div class="hint" style="margin:4px 0 12px">각 지표가 계산된 표면이 '
+            '<div class="card" style="text-align:center">'
+            f'<div class="locked" style="display:inline-block">{blur_tri}</div>'
+            f'<div style="margin-top:4px">{ILL.empty_locked()}</div>'
+            f'<div style="font-weight:600">조성 스캔 잠김</div>'
+            f'<div class="hint" style="margin:4px 0 12px">가장 진척된 지표 기준으로 '
+            f'데이터가 <b>{need_more}개 더 필요</b>합니다. 각 지표가 계산된 표면이 '
             f'{gpr.MIN_TRAINING}개에 도달하면 해당 지표의 삼각 조성도와 추천이 활성화됩니다.</div>'
-            + bars +
-            '</div></div>',
+            f'<div style="max-width:420px;margin:0 auto">{bars}</div>'
+            '</div>',
             unsafe_allow_html=True,
         )
         C.footer()
@@ -408,17 +566,21 @@ def page_reverse():
 
 # ═══════════════════════ 모델 품질 ═══════════════════════
 def page_quality():
-    C.page_header("모델 품질",
-                  "LOOCV(Leave-One-Out)로 실제 계산된 성능 수치만 표시합니다. 추정값은 쓰지 않습니다.")
+    st.markdown(
+        '<div class="page-title">모델 품질</div>'
+        f'<div class="page-sub">{C.info_tooltip("LOOCV", "LOOCV")}로 실제 계산된 성능 수치만 '
+        '표시합니다. 추정값은 쓰지 않습니다.</div>',
+        unsafe_allow_html=True,
+    )
     # 지표 3개 각각 별도로 표시: ok면 KPI + parity plot, 아니면 빈 상태 카드
     for metric in registry.ALL_METRICS:
         pts = registry.trainable_points_for_metric(entries, comp_map, metric, geom_map)
         q = loocv(pts, metric)
         C.section_title(METRIC_LABEL[metric])
         if not q.ok:
-            C.empty_state("📈", f"데이터 {gpr.MIN_TRAINING}개 이상 필요",
-                          f"현재 {q.n}개 — LOOCV로 성능을 계산하려면 "
-                          f"지표가 계산된 표면이 {gpr.MIN_TRAINING}개 이상이어야 합니다.")
+            C.empty_state_svg(ILL.empty_chart(), f"데이터 {gpr.MIN_TRAINING}개 이상 필요",
+                              f"현재 {q.n}개 — LOOCV로 성능을 계산하려면 "
+                              f"지표가 계산된 표면이 {gpr.MIN_TRAINING}개 이상이어야 합니다.")
             continue
         c1, c2, c3, c4 = st.columns(4)
         c1.markdown(C.kpi_card("학습 데이터", str(q.n), "개"), unsafe_allow_html=True)
@@ -437,6 +599,22 @@ def page_quality():
 def page_registry_view():
     C.page_header("데이터 레지스트리",
                   "모든 에너지 항목·출처·calc_group·상태를 확인하고, CSV로 새 데이터를 반영합니다.")
+
+    # 데이터 신뢰 원칙 3줄 카드
+    st.markdown(
+        '<div class="trust-card">'
+        '<div class="kpi-label" style="margin-bottom:6px">데이터 신뢰 원칙</div>'
+        '<div class="trust-item"><span class="ti-ic">✓</span>'
+        '<span>모든 값은 <span class="mono">data/energies.csv</span>에서 읽으며, 코드에 '
+        '하드코딩하지 않습니다.</span></div>'
+        '<div class="trust-item"><span class="ti-ic">✓</span>'
+        f'<span>모든 수치에 출처(source_file)와 {C.info_tooltip("calc_group", "calc_group")}을 '
+        '함께 표시합니다.</span></div>'
+        '<div class="trust-item"><span class="ti-ic">✓</span>'
+        '<span>서로 다른 calc_group의 값은 섞지 않고 계산을 거부합니다.</span></div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
     if load_errors:
         C.notice("suspect", "로드 중 거부된 행이 있습니다",

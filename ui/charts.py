@@ -81,6 +81,20 @@ def ternary_scan(grid, mu, sigma, metric: str) -> go.Figure:
     return fig
 
 
+def ead_bar_png(rows: list[dict]) -> go.Figure:
+    """PNG 내보내기용 E_ad 막대차트. 배경 흰색, 가스 고정색 유지."""
+    fig = ead_bar(rows)
+    fig.update_layout(
+        paper_bgcolor="#FFFFFF",
+        plot_bgcolor="#FFFFFF",
+        font=dict(color="#334155"),
+        title=dict(text="계산 완료된 흡착 에너지 (E_ad)", x=0.02, xanchor="left",
+                   font=dict(size=15)),
+        margin=dict(l=50, r=30, t=50, b=50),
+    )
+    return fig
+
+
 def parity_plot(y_true, y_pred, metric: str) -> go.Figure:
     """예측-실측 산점도 (LOOCV)."""
     lo = min(min(y_true), min(y_pred))

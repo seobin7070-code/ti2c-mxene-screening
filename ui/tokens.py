@@ -10,7 +10,10 @@ from __future__ import annotations
 BG = "#FAFAF9"
 CARD = "#FFFFFF"
 BORDER = "#E7E5E4"
-PRIMARY = "#0F766E"        # 딥 틸 (신뢰/과학/환경)
+PRIMARY = "#0F766E"        # 딥 틸 (신뢰/과학/환경) — 주조색
+NAVY = "#0B1F33"           # 딥 네이비 — 히어로/보조
+TINT = "#ECFDF5"           # 소프트 틸 틴트 (밝음)
+TINT_2 = "#F0FDFA"         # 소프트 틸 틴트 (더 밝음)
 TEXT = "#334155"           # 슬레이트 본문
 TEXT_MUTED = "#64748B"     # 보조 텍스트
 
