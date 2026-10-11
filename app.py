@@ -57,18 +57,16 @@ st.set_page_config(
 )
 theme.inject()
 
-# 발표 모드 CSS 클래스 (body에 present-mode 부여)
+# 발표 모드: 글자 1.15배·보조 설명 숨김·카드 간격 확대 (데이터는 불변)
 if st.session_state.get("present_mode"):
     st.markdown(
-        "<style>.stApp {} </style>"
-        "<script>document.body.classList.add('present-mode');</script>"
-        '<div class="present-mode-flag"></div>',
-        unsafe_allow_html=True,
-    )
-    # Streamlit은 iframe 구조라 body 클래스 대신 블록 컨테이너에 직접 적용
-    st.markdown(
-        "<style>section.main .block-container { font-size:1.15em; }"
-        ".present-only-hide { display:none !important; }</style>",
+        "<style>"
+        ".block-container { font-size:1.15em; }"
+        ".block-container .hint, .block-container .ill-caption,"
+        " .block-container [data-testid='stCaptionContainer'] { display:none !important; }"
+        ".card, .kpi-eq, .scn-card, .cat-card { margin-bottom:24px !important; padding:24px !important; }"
+        ".section-head { margin-top:28px !important; }"
+        "</style>",
         unsafe_allow_html=True,
     )
 
