@@ -1284,7 +1284,36 @@ def page_integrity():
 
 
 def page_roadmap():
-    _placeholder("모델", "잠금 해제 로드맵", "지표 모델 활성화에 필요한 다음 계산을 안내합니다.")
+    C.page_header_bc("모델", "잠금 해제 로드맵",
+                     "각 지표 모델 활성화(유효 표면 7개)에 가장 가까운 다음 계산을 안내합니다.")
+    st.markdown(
+        f'<div class="card card-tight"><div class="kpi-label">정렬 규칙</div>'
+        f'<div class="hint" style="margin-top:4px;line-height:1.6">{ROADMAP.RULE_TEXT}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    ov = ROADMAP.roadmap_overview(entries, comp_map, METRIC_LABEL,
+                                  need=gpr.MIN_TRAINING, geom_map=geom_map)
+    for row in ov:
+        C.section_head(ILL.icon_gpr(),
+                       f'{row["label"]} — 현재 {row["current"]}/{row["need"]}')
+        st.markdown(C.progress_bar(row["current"], row["need"]), unsafe_allow_html=True)
+        items = row["items"]
+        if not items:
+            C.notice("ok", "추가 계산 없이 활성화 가능하거나 이미 충분합니다.")
+            continue
+        # 가장 가까운 순으로 상위 노출
+        rows_html = ""
+        for it in items[:8]:
+            closeness = ("곧 해금" if it.missing_count <= 1 else "")
+            tag = (C.status_pill("info", closeness) if closeness else "")
+            rows_html += (f'<div style="display:flex;gap:10px;padding:8px 0;'
+                          f'border-bottom:1px solid {T.BORDER}">'
+                          f'<b style="min-width:150px">{it.surface}</b>'
+                          f'<span class="hint">부족 {it.missing_count}건: {it.missing_detail}</span>'
+                          f'&nbsp;{tag}</div>')
+        C.card(rows_html)
+    C.footer()
 
 
 def page_methods():
