@@ -33,7 +33,9 @@ def app_icon_path():
 
 
 def favicon_path():
-    return FAVICON if os.path.exists(FAVICON) else "⬡"
+    # 파일이 있으면 PNG 경로, 없으면 Streamlit이 허용하는 이모지로 폴백한다.
+    # (임의의 유니코드 심볼 "⬡" 는 page_icon 검증을 통과하지 못해 에러가 난다.)
+    return FAVICON if os.path.exists(FAVICON) else "🔷"
 
 
 def wordmark(on_dark: bool = True, size: int = 20) -> str:
