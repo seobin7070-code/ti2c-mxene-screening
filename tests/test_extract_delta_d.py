@@ -88,3 +88,40 @@ def test_geometry_feeds_screening_delta_d(tmp_path):
     assert "Ti2CO2" in geom
     dd = S.delta_d_for_surface(geom, "Ti2CO2")
     assert dd.ok and math.isclose(dd.value_A, 0.30, abs_tol=1e-6)
+
+
+def test_geometry_csv_includes_gas_surface_gap(tmp_path):
+    """geometry.csv 에 gas_surface_gap_A 컬럼이 기록되고 load_geometry 가 읽어온다."""
+    import csv
+    from core import screening as S
+    out = tmp_path / "geometry.csv"
+    r = E.compute_geometry("Ti2CO2",
+                           os.path.join(FIX, "Ti2CO2_clean.out"),
+                           os.path.join(FIX, "SO2_on_Ti2CO2.out"), gas="SO2")
+    E._write_geometry_csv([r], str(out))
+
+    # CSV 헤더에 새 컬럼이 포함되고 값이 기록되는지
+    with open(out, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert "gas_surface_gap_A" in rows[0]
+    assert math.isclose(float(rows[0]["gas_surface_gap_A"]), 2.40, abs_tol=1e-6)
+
+    # load_geometry → gas_surface_gap_for_surface 경로(대시보드 '가스–표면 간격' 축)
+    geom = S.load_geometry(str(out))
+    gap = S.gas_surface_gap_for_surface(geom, "Ti2CO2")
+    assert gap.ok and math.isclose(gap.value_A, 2.40, abs_tol=1e-6)
+
+
+def test_gas_surface_gap_missing_when_column_absent(tmp_path):
+    """구형 포맷(gap 컬럼 없음)에서도 Δd 는 되고 gap 은 '데이터 없음'으로 안전 처리."""
+    from core import screening as S
+    out = tmp_path / "geometry_old.csv"
+    out.write_text(
+        "surface,z_T_before,z_T_after,z_ref_before,z_ref_after\n"
+        "Ti2CO2,13.8,14.1,12.5,12.5\n",
+        encoding="utf-8",
+    )
+    geom = S.load_geometry(str(out))
+    assert S.delta_d_for_surface(geom, "Ti2CO2").ok          # Δd 는 여전히 계산
+    gap = S.gas_surface_gap_for_surface(geom, "Ti2CO2")
+    assert not gap.ok and gap.value_A is None                 # gap 은 안전하게 없음

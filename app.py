@@ -335,6 +335,15 @@ def _forward_metrics(surface, co2_raw, h2o_raw, so2_raw, unit):
     else:
         html += (f'<div style="padding:6px 0"><b>Δd</b> '
                  f'{C.status_pill("pending", "데이터 없음")} <span class="hint">{dd.reason}</span></div>')
+    # 가스–표면 수직 간격 (SO₂ 복합체 기준, geometry 필요)
+    gap = S.gas_surface_gap_for_surface(geometry, surface)
+    if gap.ok:
+        html += (f'<div style="padding:6px 0"><b>가스–표면 간격</b> '
+                 f'<span class="mono" style="color:{T.GAS["SO2"]["color"]}">{gap.value_A:.3f} Å</span> '
+                 f'<span class="hint">(가스 최하단 원자 ↔ 표면 최상단 말단기 수직 거리)</span></div>')
+    else:
+        html += (f'<div style="padding:6px 0"><b>가스–표면 간격</b> '
+                 f'{C.status_pill("pending", "데이터 없음")} <span class="hint">{gap.reason}</span></div>')
     C.card(html)
 
     # 분류 (P(CO2/H2O) 기준)
@@ -715,10 +724,11 @@ def page_map():
     C.scope_banner()
 
     tab = st.radio("지표",
-                   ["Eads(CO₂)", "Eads(H₂O)", "Eads(SO₂)", "P(CO₂/H₂O)", "Δd", "σ(불확실성)"],
+                   ["Eads(CO₂)", "Eads(H₂O)", "Eads(SO₂)", "P(CO₂/H₂O)",
+                    "Δd", "가스–표면 간격", "σ(불확실성)"],
                    horizontal=True)
     gas_of = {"Eads(CO₂)": "CO2", "Eads(H₂O)": "H2O", "Eads(SO₂)": "SO2"}
-    unit = "Å" if tab == "Δd" else "eV"
+    unit = "Å" if tab in ("Δd", "가스–표면 간격") else "eV"
 
     # σ 탭: 통합 GPR 로 격자 전체의 예측 불확실성 σ(P)≈√(σ_CO2²+σ_H2O²) 를 배경 필드로 표시
     if tab == "σ(불확실성)":
@@ -753,6 +763,9 @@ def page_map():
         elif tab == "P(CO₂/H₂O)":
             p = S.p_indices(entries, surf, calc_group=mk["calc_group"])["P(CO2/H2O)"]
             value = p.value_eV if p.ok else None
+        elif tab == "가스–표면 간격":
+            gap = S.gas_surface_gap_for_surface(geometry, surf)
+            value = gap.value_A if gap.ok else None
         else:  # Δd
             dd = S.delta_d_for_surface(geometry, surf)
             value = dd.value_A if dd.ok else None
@@ -775,6 +788,9 @@ def page_map():
                "같은 조성 좌표라도 세트가 다르면 각각의 계산값을 가집니다(세트 간 뺄셈 없음).")
     if tab == "Δd":
         st.caption("Δd 는 SO₂ 흡착 전후 z 좌표(geometry)가 입력된 표면에서만 표시됩니다 (명세 4.3).")
+    if tab == "가스–표면 간격":
+        st.caption("가스 분자 최하단 원자와 표면 최상단 말단기 사이의 수직 거리(Å)입니다. "
+                   "SO₂ 흡착 복합체(geometry)가 입력된 표면에서만 표시됩니다.")
 
     # 좌표 미확정 표면 안내 (좌표 자체가 없는 경우만)
     unconf = [s for s, c in comp_map.items() if c.xO is None]
@@ -923,6 +939,8 @@ def page_model():
 
     label_map = {"Eads_CO2": "Eads(CO₂)", "Eads_H2O": "Eads(H₂O)",
                  "Eads_SO2": "Eads(SO₂)", "Delta_d": "Δd"}
+    # 타깃별 단위: Eads·P 는 eV, Δd 는 Å (geometry 기반 축).
+    unit_map = {"Eads_CO2": "eV", "Eads_H2O": "eV", "Eads_SO2": "eV", "Delta_d": "Å"}
     for t in G.TARGETS:
         pts = S.training_points(entries, comp_map, t, geometry=geometry)
         n = len(pts)
@@ -932,9 +950,10 @@ def page_model():
         st.markdown(C.progress_bar(n, settings.min_train_points), unsafe_allow_html=True)
         q = G.loocv(pts, t, settings.min_train_points)
         if q.ok:
+            u = unit_map.get(t, "eV")
             cc = st.columns(2)
-            cc[0].markdown(C.kpi_card("MAE", f"{q.mae:.4f}", "eV"), unsafe_allow_html=True)
-            cc[1].markdown(C.kpi_card("RMSE", f"{q.rmse:.4f}", "eV"), unsafe_allow_html=True)
+            cc[0].markdown(C.kpi_card("MAE", f"{q.mae:.4f}", u), unsafe_allow_html=True)
+            cc[1].markdown(C.kpi_card("RMSE", f"{q.rmse:.4f}", u), unsafe_allow_html=True)
         elif t == "Delta_d" and not geometry:
             C.empty_state("📐", "Δd 데이터 대기",
                           "Δd 는 SO₂ 흡착 전후 z 좌표(geometry)가 필요합니다. "

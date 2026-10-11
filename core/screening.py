@@ -34,10 +34,17 @@ def _to_float(s):
         return None
 
 
-def load_geometry(path: str) -> dict[str, dict]:
-    """data/geometry.csv → {surface: {z_T_before, z_T_after, z_ref_before, z_ref_after}}.
+_GEOM_COLUMNS = ("z_T_before", "z_T_after", "z_ref_before", "z_ref_after",
+                 "gas_surface_gap_A")
 
-    SO₂ 흡착 전후 z 좌표(Å). 파일이 없거나 비면 빈 매핑(= Δd 데이터 없음).
+
+def load_geometry(path: str) -> dict[str, dict]:
+    """data/geometry.csv → {surface: {z_T_before, z_T_after, z_ref_before, z_ref_after,
+    gas_surface_gap_A}}.
+
+    SO₂ 흡착 전후 z 좌표(Å)와 '가스 최하단 ↔ 표면 최상단' 수직 거리(gas_surface_gap_A, Å).
+    gas_surface_gap_A 는 과거 포맷 호환을 위해 선택 컬럼으로 둔다(없으면 None).
+    파일이 없거나 비면 빈 매핑(= Δd 데이터 없음).
     """
     out: dict[str, dict] = {}
     if not os.path.exists(path):
@@ -47,8 +54,7 @@ def load_geometry(path: str) -> dict[str, dict]:
             surf = (row.get("surface") or "").strip()
             if not surf:
                 continue
-            out[surf] = {k: _to_float(row.get(k)) for k in
-                         ("z_T_before", "z_T_after", "z_ref_before", "z_ref_after")}
+            out[surf] = {k: _to_float(row.get(k)) for k in _GEOM_COLUMNS}
     return out
 
 
@@ -59,6 +65,21 @@ def delta_d_for_surface(geometry: dict, surface: str) -> DeltaDResult:
         return DeltaDResult(False, None, "geometry(z 좌표) 데이터 없음")
     return delta_d(g.get("z_T_before"), g.get("z_T_after"),
                    g.get("z_ref_before"), g.get("z_ref_after"))
+
+
+def gas_surface_gap_for_surface(geometry: dict, surface: str) -> DeltaDResult:
+    """표면의 '가스 최하단 원자 ↔ 표면 최상단 말단기' 수직 거리(Å, SO₂ 복합체 기준).
+
+    extract_delta_d.py 가 흡착 복합체에서 직접 측정해 geometry.csv 에 기록한 값을 그대로
+    표시한다(Δd 처럼 전·후 차이를 빼지 않는 '절대 간격'). 값이 없으면 사유를 담아 반환한다.
+    """
+    g = geometry.get(surface)
+    if not g:
+        return DeltaDResult(False, None, "geometry(z 좌표) 데이터 없음")
+    gap = g.get("gas_surface_gap_A")
+    if gap is None:
+        return DeltaDResult(False, None, "gas_surface_gap_A(가스–표면 간격) 데이터 없음")
+    return DeltaDResult(True, gap, None)
 
 
 # ── 엔트리 조회 (calc_group 지정 가능) ──────────────────────────
