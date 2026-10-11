@@ -1317,19 +1317,148 @@ def page_roadmap():
 
 
 def page_methods():
-    _placeholder("자료", "방법론", "수식·계산 조건·설계·한계를 설명합니다.")
+    C.page_header_bc("자료", "방법론", "수식·계산 조건·설계·한계를 설명합니다.")
+
+    C.section_head(ILL.icon_metrics(), "지표 정의")
+    st.latex(r"E_{ads} = E_{adsorbed} - (E_{clean} + E_{molecule})")
+    st.latex(r"P(\mathrm{CO_2/H_2O}) = E_{ads}(\mathrm{H_2O}) - E_{ads}(\mathrm{CO_2})")
+    st.latex(r"P(\mathrm{CO_2/SO_2}) = E_{ads}(\mathrm{SO_2}) - E_{ads}(\mathrm{CO_2})")
+    st.latex(r"\Delta d_{surface} = \left| \overline{z}_{after} - \overline{z}_{before} \right|")
+    st.caption("1 Ry = 13.6057 eV. 서로 다른 calc_group의 값은 섞어서 계산하지 않습니다.")
+
+    C.section_head(ILL.icon_gpr(), "GPR / RBF 커널")
+    st.latex(r"k(\mathbf{x}, \mathbf{x}') = "
+             r"\sigma_f^2 \exp\!\left(-\frac{\lVert \mathbf{x}-\mathbf{x}'\rVert^2}{2\ell^2}\right)"
+             r" + \sigma_n^2 \delta_{\mathbf{x},\mathbf{x}'}")
+    st.caption("입력은 조성 벡터 [xO, xF, xOH], 커널은 RBF + WhiteKernel.")
+
+    C.section_head(ILL.icon_dft(), "계산 조건 (보고서 계획값)")
+    C.notice("pending", "아래는 보고서 계획값이며 실제 .out 값과 대조가 필요합니다.",
+             "실제 출력은 '.out 파일 검사기'에서 파싱해 확인하세요.")
+    st.markdown(
+        '<div class="card"><div class="hint" style="line-height:1.9">'
+        '· 소프트웨어: Quantum ESPRESSO v7.2<br>'
+        '· 범함수 / 분산보정: PBE-D3<br>'
+        '· ecutwfc / ecutrho: 보고서 계획값 (대조 필요)<br>'
+        '· k-mesh: 3×3×1<br>'
+        '· 슈퍼셀: 2×2<br>'
+        '· 진공: 20 Å</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    C.section_head(ILL.icon_al(), "조성 설계와 한계")
+    st.markdown(
+        '<div class="card"><div class="hint" style="line-height:1.8">'
+        '· 7개 조성 설계: Scheffé 단체격자(simplex-lattice) + 중심점 구성<br>'
+        '· 한계: N=7 수준에서 GPR 하이퍼파라미터가 불안정할 수 있으며, '
+        'σ는 보정된 불확실성이 아니라 참고용 상대 지표입니다.</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    with st.expander("참고문헌 (보고서 수록 6건)"):
+        st.caption("참고문헌은 보고서에 수록된 항목만 표시합니다. 플랫폼에서 임의로 생성하지 않습니다.")
+    C.footer()
 
 
 def page_glossary():
-    _placeholder("자료", "용어집", "플랫폼에서 쓰는 용어를 검색합니다.")
+    C.page_header_bc("자료", "용어집", "플랫폼에서 쓰는 용어를 검색합니다.")
+    q = st.text_input("용어 검색", "", placeholder="예: E_ads, GPR, calc_group")
+    terms = glossary.GLOSSARY
+    shown = 0
+    for term, desc in terms.items():
+        if q and q.lower() not in term.lower() and q.lower() not in desc.lower():
+            continue
+        st.markdown(
+            f'<div class="card card-tight"><b style="color:{T.PRIMARY}">{term}</b>'
+            f'<div class="hint" style="margin-top:4px;line-height:1.6">{desc}</div></div>',
+            unsafe_allow_html=True,
+        )
+        shown += 1
+    if shown == 0:
+        C.empty_state_svg(ILL.empty_waiting(), "검색 결과가 없습니다.", "다른 용어로 검색해 보세요.")
+    C.footer()
 
 
 def page_report():
-    _placeholder("자료", "리포트 내보내기", "HTML/Markdown 리포트와 CSV 번들을 생성합니다.")
+    C.page_header_bc("자료", "리포트 내보내기",
+                     "데이터 스냅샷 해시를 포함한 HTML/Markdown 리포트와 CSV 번들을 생성합니다.")
+
+    from core import report as RP
+    import zipfile, io as _io
+
+    ead = computed_ead_rows()
+    pending = [{"scope": m.scope, "detail": m.detail}
+               for m in registry.missing_checklist(entries)]
+    flue = st.session_state.get("flue_gas", {})
+    d = RP.build_report_data(entries, ead, pending, flue, ENERGIES_CSV)
+
+    # 미리보기 요약
+    C.section_head(ILL.value_icon_source(), "리포트 요약")
+    st.markdown(
+        f'<div class="card"><div class="hint" style="line-height:1.8">'
+        f'· 생성 시각(UTC): <span class="mono">{d["generated_at"]}</span><br>'
+        f'· 데이터 스냅샷 SHA-256: <span class="mono" style="font-size:11px">'
+        f'{d["snapshot_sha256"]}</span><br>'
+        f'· 에너지 항목 {len(d["energies"])}건 · 계산된 E_ad {len(ead)}건 · '
+        f'pending {len(pending)}건</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    md = RP.to_markdown(d)
+    html_doc = RP.to_html(d)
+
+    c1, c2, c3 = st.columns(3)
+    c1.download_button("HTML 리포트 다운로드", data=html_doc.encode("utf-8"),
+                       file_name="ti2c_report.html", mime="text/html")
+    c2.download_button("Markdown 리포트 다운로드", data=md.encode("utf-8"),
+                       file_name="ti2c_report.md", mime="text/markdown")
+    # CSV 번들 (zip): energies.csv + jobs.csv(있으면) + 리포트
+    buf = _io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        with open(ENERGIES_CSV, encoding="utf-8") as f:
+            z.writestr("energies.csv", f.read())
+        if os.path.exists(JOBS_CSV):
+            with open(JOBS_CSV, encoding="utf-8") as f:
+                z.writestr("jobs.csv", f.read())
+        z.writestr("report.md", md)
+        z.writestr("report.html", html_doc)
+    c3.download_button("CSV 번들(zip) 다운로드", data=buf.getvalue(),
+                       file_name="ti2c_bundle.zip", mime="application/zip")
+
+    with st.expander("Markdown 미리보기"):
+        st.code(md, language="markdown")
+    C.footer()
 
 
 def page_about():
-    _placeholder("자료", "팀·프로젝트 소개", "RE:ACT와 프로젝트 목표를 소개합니다.")
+    C.page_header_bc("자료", "팀·프로젝트 소개", "RE:ACT와 프로젝트 목표를 소개합니다.")
+
+    st.markdown(
+        f'<div class="card"><div style="display:flex;align-items:center;gap:10px">'
+        f'{ILL.composition_triangle(size=30)}'
+        f'<span style="font-size:20px">{B.wordmark(on_dark=False, size=22)}</span></div>'
+        f'<div class="hint" style="margin-top:8px;line-height:1.7">'
+        f'{B.SCHOOL} · {B.DEPT}<br>{B.EVENT}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    C.section_head(ILL.icon_al(), "프로젝트 목표와 가설")
+    st.markdown(
+        '<div class="card"><div class="hint" style="line-height:1.8">'
+        '· 목표: Ti₂C MXene 표면 말단기(-O/-F/-OH) 조성에 따른 CO₂·H₂O·SO₂ 흡착 거동을 '
+        'DFT로 산출하고, Active Learning으로 CO₂ 선택 포집에 유망한 조성을 탐색한다.<br>'
+        '· 가설: 말단기 조성이 가스별 흡착 선택성과 표면 변형(Δd)에 영향을 미치며, '
+        '조성 공간 탐색으로 선택성이 유리한 영역을 식별할 수 있다. (보고서 1.3절 기준)'
+        '</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    # 팀원: MEMBERS가 비어 있으면 섹션 자체를 숨김
+    if B.has_members():
+        C.section_head(ILL.value_icon_source(), "팀원")
+        st.markdown('<div class="card">' + " · ".join(B.MEMBERS) + "</div>",
+                    unsafe_allow_html=True)
+    C.footer()
 
 
 # ───────────────────────── 라우팅 ─────────────────────────
