@@ -1,0 +1,14 @@
+# 과학 데이터 B2B SaaS 대시보드 테마 (기본 라이트, 다크 지원)
+[theme]
+base = "light"
+primaryColor = "#0F766E"          # 딥 틸 — 주조색
+backgroundColor = "#FAFAF9"       # 배경
+secondaryBackgroundColor = "#FFFFFF"  # 카드/사이드바
+textColor = "#334155"             # 슬레이트 본문
+font = "sans serif"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false

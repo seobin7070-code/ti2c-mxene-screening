@@ -1,0 +1,5 @@
+surface,xO,xF,xOH,confirmed
+Ti2CO2,1,0,0,true
+Ti2CF2,0,1,0,true
+Ti2C_OF,0.5,0.5,0,true
+Ti2C_FH,,,,false
