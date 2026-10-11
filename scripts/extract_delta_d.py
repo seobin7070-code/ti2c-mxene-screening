@@ -353,14 +353,18 @@ def compute_geometry(surface: str, clean_file: str, adsorbed_file: str,
 
 # ───────────────────────── CLI / 출력 ─────────────────────────
 def _write_geometry_csv(rows: list[GeometryRow], out_path: str):
-    header = ["surface", "z_T_before", "z_T_after", "z_ref_before", "z_ref_after"]
+    # gas_surface_gap_A(가스 최하단 ↔ 표면 최상단 수직 거리)도 함께 기록한다.
+    # Δd 는 네 z 좌표에서 유도되고, gap 은 흡착 복합체(after)에서 직접 측정한 값이다.
+    header = ["surface", "z_T_before", "z_T_after", "z_ref_before", "z_ref_after",
+              "gas_surface_gap_A"]
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(header)
         for r in rows:
             w.writerow([r.surface, f"{r.z_T_before:.6f}", f"{r.z_T_after:.6f}",
-                        f"{r.z_ref_before:.6f}", f"{r.z_ref_after:.6f}"])
+                        f"{r.z_ref_before:.6f}", f"{r.z_ref_after:.6f}",
+                        f"{r.gas_surface_gap_A:.6f}"])
 
 
 def _run_manifest(manifest: str, files_dir: str, gas_default: str) -> list[GeometryRow]:
