@@ -111,6 +111,18 @@ def fmt(x, nd=3):
     return "—" if x is None else f"{x:.{nd}f}"
 
 
+def _file_sha256(path):
+    """파일 SHA-256(모델·데이터 버전 식별). 없으면 '—'."""
+    import hashlib
+    if not os.path.exists(path):
+        return "—"
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for ch in iter(lambda: f.read(8192), b""):
+            h.update(ch)
+    return h.hexdigest()
+
+
 # ───────────────────────── GPR 모델 (타깃 4개) ─────────────────
 @st.cache_resource(show_spinner=False)
 def _fit_models(mtime_e, mtime_c, mtime_g, min_train):
@@ -409,6 +421,68 @@ def get_unified_model():
     return G.fit_unified(pts, settings.min_train_points), len(pts)
 
 
+def _reverse_pareto(model, cg, co2_raw, h2o_raw, so2_raw):
+    """우선 검토 후보 탐색 (명세 6.2): 격자 전체를 분류 → 우선 검토 → Pareto → σ 정렬 → 지도 표시."""
+    C.section_title(f"우선 검토 후보 — {cg} 기준")
+    # 조건 보정 δ_H2O (분율이 유효할 때만). 조성과 무관하게 모든 격자점에 같은 값이 더해진다.
+    p_co2 = _parse_fraction(co2_raw, "mol%")
+    p_h2o = _parse_fraction(h2o_raw, "mol%")
+    delta_h2o = None
+    if p_co2 and p_co2 > 0 and p_h2o and p_h2o > 0:
+        cc = S.condition_correction(p_co2, p_h2o, 0.0)
+        delta_h2o = cc.delta_h2o
+    # 격자 전체 평가: 각 조성에서 μ(CO₂·H₂O)·σ → P_cond·σ(P) → 분류
+    priority = []
+    for comp in get_grid(settings.composition_grid):
+        mu_co2, s_co2 = model.predict(comp, cg, "CO2")
+        mu_h2o, s_h2o = model.predict(comp, cg, "H2O")
+        p = mu_h2o - mu_co2                        # P(CO2/H2O) = Eads(H2O) − Eads(CO2)
+        sig_p = G.sigma_P(s_co2, s_h2o)
+        p_cond = p + (delta_h2o if delta_h2o is not None else 0.0)
+        inp = ClassifyInput(mu_p_cond=p_cond, sigma_p=sig_p, mu_eads_co2=mu_co2,
+                            sigma_eads_co2=s_co2, reaction_flag="none")
+        res = classify(inp, settings.kappa, settings.margin_m_eV,
+                       settings.delta_d_max_A, settings.sigma_max_eV,
+                       settings.preset, settings.wide_range)
+        if res.label == "우선 검토":
+            priority.append({"composition": comp,
+                             "p_cond_lower": p_cond - settings.kappa * sig_p,
+                             "dd_upper": None,   # Δd geometry 없으면 축 미사용
+                             "sigma": sig_p, "p_cond": p_cond,
+                             "mu_co2": mu_co2, "mu_h2o": mu_h2o})
+    recs = G.recommend_pareto(priority, top=5)
+    note = ("온도·분압 1차 보정 적용" if delta_h2o is not None
+            else "분율 미입력 → 보정 전 P 로 분류")
+    if not recs:
+        near = None
+        if priority:
+            near = max(priority, key=lambda d: d["p_cond_lower"])
+        C.notice("pending", "기준을 충족하는 구성이 없습니다.",
+                 (f"가장 가까운 후보: xO/F/OH = "
+                  f"{near['composition'][0]:.2f}/{near['composition'][1]:.2f}/"
+                  f"{near['composition'][2]:.2f} (P_cond 하한 {near['p_cond_lower']:+.3f} eV)"
+                  if near else f"격자 전체에서 우선 검토 후보가 없습니다 ({note})."))
+        markers = []
+    else:
+        items = ""
+        for i, r in enumerate(recs, 1):
+            c = r["composition"]
+            items += (f'<div style="padding:8px 0;border-bottom:1px solid {T.BORDER}">'
+                      f'<b>#{i}</b> <span class="mono">xO/F/OH = '
+                      f'{c[0]:.2f}/{c[1]:.2f}/{c[2]:.2f}</span> '
+                      f'<span class="hint">P_cond {r["p_cond"]:+.3f} eV '
+                      f'(하한 {r["p_cond_lower"]:+.3f}) · σ(P) {r["sigma"]:.3f} eV</span></div>')
+        C.card(items)
+        st.caption(f"비지배(Pareto) 선별 후 σ 작은 순. {note}. " + G.SIGMA_NOTE)
+        markers = [{"xO": r["composition"][0], "xF": r["composition"][1],
+                    "xOH": r["composition"][2], "kind": "computed",
+                    "value": r["p_cond"], "label": f"#{i} 후보"}
+                   for i, r in enumerate(recs, 1)]
+    # 조성 지도에 후보 표시 (명세 6.2: 조성 지도에 후보 표시)
+    st.plotly_chart(charts.composition_map(markers, "P_cond(CO₂/H₂O)", "eV"),
+                    use_container_width=True)
+
+
 def page_reverse():
     C.breadcrumb("설계", "GPR 예측 및 역방향 추천")
     C.page_header("GPR 예측 및 역방향 추천",
@@ -442,7 +516,8 @@ def page_reverse():
         C.section_title("예측 조건")
         cg = st.selectbox("데이터 세트 (스케일 기준)", list(model.scales.keys()),
                           help="세트마다 셀 스케일이 다르므로 예측 기준 세트를 지정합니다.")
-        mode = st.radio("모드", ["조성 → 예측", "목표 흡착 에너지 → 조성 추천"])
+        mode = st.radio("모드", ["조성 → 예측", "목표 흡착 에너지 → 조성 추천",
+                                "우선 검토 후보 탐색 (Pareto)"])
 
         if mode == "조성 → 예측":
             xF = st.slider("xF (–F)", 0.0, 1.0, 0.5, 0.05)
@@ -452,6 +527,13 @@ def page_reverse():
             if abs(ssum - 1.0) > 1e-6:
                 C.notice("suspect", f"합이 1이 아닙니다(현재 {ssum:.2f})",
                          "세 비율의 합이 1이 되도록 맞춰 주세요.")
+        elif mode == "우선 검토 후보 탐색 (Pareto)":
+            st.caption("배가스 조건(mol%)으로 분류 기준선을 옮긴 뒤, 우선 검토 후보를 "
+                       "비지배(Pareto) 선별해 σ 작은 순으로 보여줍니다 (명세 6.2).")
+            pc = st.columns(3)
+            rev_co2 = pc[0].text_input("CO₂ mol%", "12", key="rev_co2")
+            rev_h2o = pc[1].text_input("H₂O mol%", "10", key="rev_h2o")
+            rev_so2 = pc[2].text_input("SO₂ mol%", "0.05", key="rev_so2")
         else:
             st.caption("추천에 사용할 가스별 목표 E_ads(eV)를 지정하세요(선택).")
             use_co2 = st.checkbox("CO₂ 목표 사용", True)
@@ -462,7 +544,9 @@ def page_reverse():
             tgt_h2o = st.number_input("목표 E_ads(H₂O)", value=-0.04, step=0.01, format="%.3f")
 
     with right:
-        if mode == "조성 → 예측":
+        if mode == "우선 검토 후보 탐색 (Pareto)":
+            _reverse_pareto(model, cg, rev_co2, rev_h2o, rev_so2)
+        elif mode == "조성 → 예측":
             C.section_title(f"GPR 예측 — {cg} 기준")
             if abs((xO + xF + xOH) - 1.0) <= 1e-6:
                 rows_html = ""
@@ -507,6 +591,33 @@ def page_reverse():
                 st.caption("추천은 조성 격자(1/4 단위) 중 목표 E_ads에 가장 가까운 지점입니다. "
                            + G.SIGMA_NOTE)
 
+    # ── 다음 계산 후보 (PDF 7): 미계산 격자점 중 불확실성 score=Σσ_k/s_k 최대 ──
+    C.section_title("다음 계산 후보")
+    per_target = get_models()
+    active_targets = [t for t in G.TARGETS if isinstance(per_target[t], G.GprModel)]
+    computed_pts = S.computed_grid_points(entries, comp_map)
+    cands = G.next_candidates(per_target, get_grid(settings.composition_grid),
+                              computed_pts, top=3)
+    if not active_targets:
+        C.notice("pending", "타깃별 GPR이 모두 비활성이라 다음 계산 후보를 낼 수 없습니다.",
+                 f"타깃별 학습 데이터가 {settings.min_train_points}개에 도달하면 활성화됩니다.")
+    elif not cands:
+        C.notice("ok", "격자의 모든 조성이 이미 계산되었습니다.",
+                 "새 조성 격자를 넓히거나 데이터를 추가하면 후보가 다시 제안됩니다.")
+    else:
+        items = ""
+        for i, x in enumerate(cands, 1):
+            c = x["composition"]
+            items += (f'<div style="padding:8px 0;border-bottom:1px solid {T.BORDER}">'
+                      f'<b>#{i}</b> <span class="mono">xO/F/OH = '
+                      f'{c[0]:.2f}/{c[1]:.2f}/{c[2]:.2f}</span> '
+                      f'<span class="hint">불확실성 점수 {x["score"]:.3f} '
+                      f'(Σ σ_k/s_k, 클수록 정보량 큼)</span></div>')
+        C.card(items)
+        st.caption("아직 계산하지 않은 1/4-격자 조성 중, 타깃별 예측 불확실성(σ)을 "
+                   "학습 표준편차로 정규화해 합한 값이 큰 순서입니다. "
+                   f"현재 활성 타깃: {', '.join(active_targets)}. " + G.SIGMA_NOTE)
+
     # LOOCV 요약
     with st.expander("모델 성능 (LOOCV)"):
         q = G.loocv_unified(S.training_points_unified(entries, comp_map),
@@ -526,10 +637,35 @@ def page_map():
     C.page_header("조성 지도", "삼원 조성 공간에서 계산·계획 조성과 지표를 봅니다.")
     C.scope_banner()
 
-    tab = st.radio("지표", ["Eads(CO₂)", "Eads(H₂O)", "Eads(SO₂)", "P(CO₂/H₂O)", "Δd"],
+    tab = st.radio("지표",
+                   ["Eads(CO₂)", "Eads(H₂O)", "Eads(SO₂)", "P(CO₂/H₂O)", "Δd", "σ(불확실성)"],
                    horizontal=True)
     gas_of = {"Eads(CO₂)": "CO2", "Eads(H₂O)": "H2O", "Eads(SO₂)": "SO2"}
     unit = "Å" if tab == "Δd" else "eV"
+
+    # σ 탭: 통합 GPR 로 격자 전체의 예측 불확실성 σ(P)≈√(σ_CO2²+σ_H2O²) 를 배경 필드로 표시
+    if tab == "σ(불확실성)":
+        model, _n = get_unified_model()
+        if not isinstance(model, G.UnifiedModel):
+            C.notice("pending", "통합 GPR이 비활성이라 σ 지도를 그릴 수 없습니다.",
+                     f"통합 학습 데이터가 {settings.min_train_points}개에 도달하면 활성화됩니다.")
+            C.footer()
+            return
+        cg0 = next(iter(model.scales.keys()))
+        sig_markers = []
+        for comp in get_grid(settings.composition_grid):
+            _, s_co2 = model.predict(comp, cg0, "CO2")
+            _, s_h2o = model.predict(comp, cg0, "H2O")
+            sig_markers.append({"xO": comp[0], "xF": comp[1], "xOH": comp[2],
+                                "kind": "computed",
+                                "value": G.sigma_P(s_co2, s_h2o),
+                                "label": f"xO/F/OH={comp[0]:.2f}/{comp[1]:.2f}/{comp[2]:.2f}"})
+        st.plotly_chart(charts.composition_map(sig_markers, "σ(P)", "eV"),
+                        use_container_width=True)
+        st.caption(f"σ(P) ≈ √(σ(CO₂)²+σ(H₂O)²) 를 1/4-격자 전체에서 예측한 값입니다({cg0} 기준). "
+                   "계산 조성에 가까울수록 작습니다. " + G.SIGMA_NOTE)
+        C.footer()
+        return
 
     markers = []
     # 1) 두 세트의 확정 표면 마커 (세트별로 각각 — SET1·SET2 모두 표시)
@@ -708,7 +844,6 @@ def page_model():
     C.page_header("모델 정보", "타깃별 학습 데이터와 LOOCV 성능을 표시합니다.")
     C.scope_banner()
 
-    import hashlib
     label_map = {"Eads_CO2": "Eads(CO₂)", "Eads_H2O": "Eads(H₂O)",
                  "Eads_SO2": "Eads(SO₂)", "Delta_d": "Δd"}
     for t in G.TARGETS:
@@ -734,18 +869,12 @@ def page_model():
     st.caption(G.SIGMA_NOTE)
     C.card('<div class="hint">혼합 표면은 조성당 대표 배열 1개로 고정합니다.</div>')
 
-    # 데이터 파일 SHA-256
-    def sha(path):
-        if not os.path.exists(path):
-            return "—"
-        h = hashlib.sha256()
-        with open(path, "rb") as f:
-            for ch in iter(lambda: f.read(8192), b""):
-                h.update(ch)
-        return h.hexdigest()
+    # 데이터 파일 SHA-256 (energies·composition·geometry)
     C.card(f'<div class="kpi-label">데이터 버전 (SHA-256)</div>'
            f'<div class="mono" style="font-size:11px;word-break:break-all;margin-top:4px">'
-           f'energies.csv · {sha(ENERGIES_CSV)}</div>')
+           f'energies.csv · {_file_sha256(ENERGIES_CSV)}<br>'
+           f'composition_map.csv · {_file_sha256(COMP_CSV)}<br>'
+           f'geometry.csv · {_file_sha256(GEOM_CSV)}</div>')
     C.footer()
 
 
@@ -818,9 +947,37 @@ th,td{{border:1px solid #E7E5E4;padding:4px 8px;text-align:left}}
 <h2>계산된 E_ads</h2>
 <table><tr><th>표면</th><th>가스</th><th>E_ads(eV)</th><th>E_ads(Ry)</th>
 <th>calc_group</th><th>source_file</th></tr>{rows_html}</table>
+<h2>모델·데이터 버전</h2>
+{_report_version_html()}
 <h2>데이터 없음</h2>
-<p>H₂O 관련 항목과 P 지수는 현재 데이터 없음. Δd(geometry) 데이터 없음.</p>
+<p>{_report_missing_note()}</p>
 </body></html>"""
+
+
+def _report_version_html() -> str:
+    """리포트의 '모델·데이터 버전' 섹션: 데이터 파일 SHA-256 + 통합 LOOCV (명세 6.4)."""
+    import html as _h
+    q = G.loocv_unified(S.training_points_unified(entries, comp_map),
+                        settings.min_train_points)
+    loocv = (f"통합 GPR LOOCV — 학습 {q.n}개 · MAE {q.mae:.4f} eV · RMSE {q.rmse:.4f} eV"
+             if q.ok else f"통합 GPR LOOCV — {q.reason}")
+    files = [("energies.csv", ENERGIES_CSV), ("composition_map.csv", COMP_CSV),
+             ("geometry.csv", GEOM_CSV)]
+    rows = "".join(
+        f"<tr><td>{_h.escape(name)}</td><td style='font-family:monospace;font-size:11px'>"
+        f"{_file_sha256(path)}</td></tr>" for name, path in files)
+    return (f"<p>{_h.escape(loocv)}</p>"
+            f"<table><tr><th>데이터 파일</th><th>SHA-256</th></tr>{rows}</table>")
+
+
+def _report_missing_note() -> str:
+    """현재 데이터 기준 '데이터 없음' 항목을 실제 상태에서 산출(하드코딩 금지)."""
+    notes = []
+    if not geometry:
+        notes.append("Δd(geometry z 좌표) 데이터 없음")
+    if S.find_molecule(entries, "H2O", calc_group="SET2") is None:
+        notes.append("SET2 H₂O 단독 분자 없음 → SET2 단독 H₂O/P(CO₂/H₂O) 데이터 없음")
+    return " · ".join(notes) if notes else "현재 데이터 없음 항목이 없습니다."
 
 
 def _settings_str():

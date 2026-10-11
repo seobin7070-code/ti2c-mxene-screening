@@ -324,6 +324,18 @@ def confirmed_surface_markers(entries, comp_map) -> list[dict]:
     return out
 
 
+def computed_grid_points(entries, comp_map) -> set:
+    """이미 계산된(조성 확정 + E_ads 보유) 표면의 조성 좌표 집합 {(xO,xF,xOH)}.
+
+    '다음 계산 후보'(PDF 7)에서 격자 중 이미 계산된 점을 제외하는 데 쓴다.
+    """
+    pts = set()
+    for s in computed_surfaces(entries, comp_map):
+        c = comp_map[s]
+        pts.add((c.xO, c.xF, c.xOH))
+    return pts
+
+
 def nearest_computed(entries, comp_map, xO, xF, xOH) -> Optional[dict]:
     """임의 조성에서 가장 가까운 계산 조성과 거리(u,v 평면)."""
     best = None

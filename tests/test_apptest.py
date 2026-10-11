@@ -82,3 +82,55 @@ def test_gpr_activation_with_threshold3():
         assert isinstance(models[t], GprModel), f"{t} 비활성"
     # Δd 는 geometry 데이터가 없어 학습점 0개 → 비활성
     assert isinstance(models["Delta_d"], GprUnavailable)
+
+
+def test_export_report_includes_version_and_loocv():
+    """(E) 내보내기 HTML 리포트에 모델·데이터 버전(SHA-256)과 LOOCV 가 포함된다 (명세 6.4)."""
+    import importlib
+    import pandas as pd
+    app = importlib.import_module("app")
+    html = app._build_html_report(pd.DataFrame([]))
+    assert "모델·데이터 버전" in html
+    assert "SHA-256" in html
+    assert "LOOCV" in html
+    assert "적용 범위" in html          # 기존 적용 범위도 유지
+
+
+def test_reverse_pareto_mode_renders():
+    """(B) 역방향 '우선 검토 후보 탐색 (Pareto)' 모드가 예외 없이 렌더된다."""
+    at = AT.from_file(APP, default_timeout=90)
+    at.query_params["enter"] = "1"
+    at.session_state["current_page"] = "역방향 추천"
+    at.run()
+    assert not at.exception
+    # 모드 라디오를 Pareto 로 전환
+    for r in at.radio:
+        opts = [str(o) for o in (r.options or [])]
+        if any("Pareto" in o for o in opts):
+            at2 = r.set_value("우선 검토 후보 탐색 (Pareto)").run()
+            assert not at2.exception
+            break
+
+
+def test_map_sigma_tab_renders():
+    """(C) 조성 지도 σ 탭이 예외 없이 렌더된다 (명세 6.3)."""
+    at = AT.from_file(APP, default_timeout=90)
+    at.query_params["enter"] = "1"
+    at.session_state["current_page"] = "조성 지도"
+    at.run()
+    for r in at.radio:
+        opts = [str(o) for o in (r.options or [])]
+        if any("σ" in o for o in opts):
+            at2 = r.set_value("σ(불확실성)").run()
+            assert not at2.exception
+            break
+
+
+def test_reverse_next_candidate_section():
+    """(D) 역방향 페이지에 '다음 계산 후보' 섹션이 표시된다 (명세 7)."""
+    at = AT.from_file(APP, default_timeout=90)
+    at.query_params["enter"] = "1"
+    at.session_state["current_page"] = "역방향 추천"
+    at.run()
+    md = "\n".join((m.value or "") for m in at.markdown)
+    assert "다음 계산 후보" in md

@@ -204,6 +204,46 @@ def recommend_unified(model, grid, calc_group: str, target_values: dict,
     return out[:top]
 
 
+def pareto_front(cands: list[dict]) -> list[dict]:
+    """비지배(Pareto) 후보만 남긴다 (PDF 6.2).
+
+    목표: P_cond 하한(p_cond_lower)은 '클수록' 좋고, Δd 상한(dd_upper)은 '작을수록' 좋다.
+    Δd 가 None(데이터 없음)인 후보는 Δd 축을 무시하고 P_cond 하한만으로 비교한다.
+    cands: [{composition, p_cond_lower, dd_upper(opt), sigma, ...}].
+    반환: 비지배 후보 리스트(원소는 입력 dict 그대로).
+    """
+    def dominates(a, b) -> bool:
+        """a 가 b 를 지배하는가? (모든 목표에서 a≥b, 하나 이상에서 a>b)"""
+        a_p, b_p = a["p_cond_lower"], b["p_cond_lower"]
+        # Δd: 둘 다 값이 있을 때만 비교축으로 사용
+        use_dd = a.get("dd_upper") is not None and b.get("dd_upper") is not None
+        ge = a_p >= b_p
+        gt = a_p > b_p
+        if use_dd:
+            ge = ge and (a["dd_upper"] <= b["dd_upper"])
+            gt = gt or (a["dd_upper"] < b["dd_upper"])
+        return ge and gt
+
+    front = []
+    for c in cands:
+        if not any(dominates(o, c) for o in cands if o is not c):
+            front.append(c)
+    return front
+
+
+def recommend_pareto(cands: list[dict], top: int = 5) -> list[dict]:
+    """우선 검토 후보 → 비지배 선별 → σ 오름차순 정렬 (PDF 6.2).
+
+    cands: 우선 검토로 분류된 후보 [{composition, p_cond_lower, dd_upper, sigma, ...}].
+    비어 있으면 빈 리스트(=우선 검토 후보 없음).
+    """
+    if not cands:
+        return []
+    front = pareto_front(cands)
+    front.sort(key=lambda d: d.get("sigma", 0.0))
+    return front[:top]
+
+
 @dataclass
 class LoocvResult:
     ok: bool

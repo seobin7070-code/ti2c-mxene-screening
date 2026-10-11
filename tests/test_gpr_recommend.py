@@ -121,3 +121,53 @@ def test_map_markers_both_sets():
     # SET1 확정 표면 3개(Ti2CF2, Ti2C_OF_alt, Ti2C_FOH_clu)
     set1 = {m["surface"] for m in mks if m["calc_group"] == "SET1"}
     assert {"Ti2CF2", "Ti2C_OF_alt", "Ti2C_FOH_clu"} <= set1
+
+
+# ── (B) Pareto 역방향 추천 (명세 6.2) ───────────────────────────
+def test_pareto_front_dominance():
+    """P_cond 하한은 클수록, Δd 상한은 작을수록 좋음. 지배당하는 점은 제외."""
+    cands = [
+        {"composition": (1, 0, 0), "p_cond_lower": 0.20, "dd_upper": 0.5, "sigma": 0.1},
+        {"composition": (0, 1, 0), "p_cond_lower": 0.10, "dd_upper": 0.9, "sigma": 0.2},  # 지배당함
+        {"composition": (0, 0, 1), "p_cond_lower": 0.15, "dd_upper": 0.3, "sigma": 0.3},
+    ]
+    front = G.pareto_front(cands)
+    comps = {c["composition"] for c in front}
+    assert (1, 0, 0) in comps          # p 최고 + dd 중간 → 비지배
+    assert (0, 0, 1) in comps          # dd 최저 → 비지배
+    assert (0, 1, 0) not in comps      # 두 축 모두 열세 → 지배당함
+
+
+def test_pareto_front_ignores_dd_when_none():
+    """Δd 가 모두 None 이면 P_cond 하한만으로 비교한다."""
+    cands = [
+        {"composition": (1, 0, 0), "p_cond_lower": 0.20, "dd_upper": None, "sigma": 0.1},
+        {"composition": (0, 1, 0), "p_cond_lower": 0.10, "dd_upper": None, "sigma": 0.2},
+    ]
+    front = G.pareto_front(cands)
+    assert {c["composition"] for c in front} == {(1, 0, 0)}  # p 더 큰 쪽만
+
+
+def test_recommend_pareto_sorts_by_sigma():
+    """비지배 후보를 σ 오름차순으로 정렬해 반환한다."""
+    cands = [
+        {"composition": (1, 0, 0), "p_cond_lower": 0.20, "dd_upper": None, "sigma": 0.30},
+        {"composition": (0, 0, 1), "p_cond_lower": 0.20, "dd_upper": None, "sigma": 0.10},
+    ]
+    recs = G.recommend_pareto(cands, top=5)
+    # 두 점 모두 p_cond_lower 동일 → 둘 다 비지배 → σ 오름차순
+    assert [r["sigma"] for r in recs] == [0.10, 0.30]
+
+
+def test_recommend_pareto_empty():
+    assert G.recommend_pareto([], top=5) == []
+
+
+# ── (D) 다음 계산 후보 (명세 7) ─────────────────────────────────
+def test_computed_grid_points_excluded():
+    """computed_grid_points 는 계산된 조성 좌표 집합을 돌려주고, 격자 후보에서 제외된다."""
+    entries, comp = _load()
+    pts = S.computed_grid_points(entries, comp)
+    assert (1.0, 0.0, 0.0) in pts and (0.5, 0.25, 0.25) in pts   # 계산된 조성
+    # 미계산 격자점은 포함되지 않음
+    assert (0.25, 0.0, 0.75) not in pts
