@@ -9,6 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+import csv
+import os
+
 from core.loader import EnergyEntry
 from core.composition import Composition, is_trainable
 from core.energetics import AdResult, compute_E_ad
@@ -18,6 +21,44 @@ from core.classify import classify, ClassifyInput, ClassifyResult
 from core.coords import distance_uv
 
 GASES = ["CO2", "H2O", "SO2"]
+
+
+# ── Δd geometry (PDF 4.3) ───────────────────────────────────────
+def _to_float(s):
+    s = (s or "").strip()
+    if s == "":
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def load_geometry(path: str) -> dict[str, dict]:
+    """data/geometry.csv → {surface: {z_T_before, z_T_after, z_ref_before, z_ref_after}}.
+
+    SO₂ 흡착 전후 z 좌표(Å). 파일이 없거나 비면 빈 매핑(= Δd 데이터 없음).
+    """
+    out: dict[str, dict] = {}
+    if not os.path.exists(path):
+        return out
+    with open(path, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            surf = (row.get("surface") or "").strip()
+            if not surf:
+                continue
+            out[surf] = {k: _to_float(row.get(k)) for k in
+                         ("z_T_before", "z_T_after", "z_ref_before", "z_ref_after")}
+    return out
+
+
+def delta_d_for_surface(geometry: dict, surface: str) -> DeltaDResult:
+    """표면의 Δd (SO₂ 한정). geometry 에 네 z 좌표가 모두 있어야 계산."""
+    g = geometry.get(surface)
+    if not g:
+        return DeltaDResult(False, None, "geometry(z 좌표) 데이터 없음")
+    return delta_d(g.get("z_T_before"), g.get("z_T_after"),
+                   g.get("z_ref_before"), g.get("z_ref_after"))
 
 
 # ── 엔트리 조회 (calc_group 지정 가능) ──────────────────────────
@@ -186,15 +227,25 @@ def computed_surfaces(entries, comp_map) -> list[str]:
 _TARGET_GAS = {"Eads_CO2": "CO2", "Eads_H2O": "H2O", "Eads_SO2": "SO2"}
 
 
-def training_points(entries, comp_map, target: str) -> list:
+def training_points(entries, comp_map, target: str, geometry: dict | None = None) -> list:
     """타깃별 학습 데이터: [((xO,xF,xOH), y)].
 
     Eads_* : 조성 확정 + 해당 가스 E_ads 계산값이 있는 표면.
-    Delta_d: geometry 기반(현재 데이터 없음 → 빈 리스트).
+    Delta_d: 조성 확정 + geometry(z 좌표) 가 있어 Δd 계산되는 표면.
+             geometry 데이터가 없으면 빈 리스트(= Δd GPR 비활성).
     """
     pts = []
     if target == "Delta_d":
-        return pts  # geometry 데이터 없음
+        if not geometry:
+            return pts
+        for s in surfaces(entries):
+            comp = comp_map.get(s)
+            if not is_trainable(comp):
+                continue
+            dd = delta_d_for_surface(geometry, s)
+            if dd.ok:
+                pts.append(((comp.xO, comp.xF, comp.xOH), dd.value_A))
+        return pts
     gas = _TARGET_GAS.get(target)
     if gas is None:
         return pts

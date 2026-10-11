@@ -90,23 +90,34 @@ def composition_map(markers: list[dict], metric_label: str, unit: str = "eV") ->
             xs.append(x); ys.append(y)
         return xs, ys
 
-    # 계산값 ◆ (채움, 값이 있으면 컬러바)
-    if computed:
-        xs, ys = xy(computed)
-        vals = [m.get("value") for m in computed]
-        has_val = all(v is not None for v in vals) and len(vals) > 0
+    # 계산값 ◆ — 값이 있는 마커는 컬러 매핑, 없는 마커는 '값 없음'으로 흐리게 표시.
+    # (예전엔 하나라도 값이 없으면 전체 컬러바를 끄는 all-or-nothing 이라 탭을 바꿔도
+    #  지도 색이 안 바뀌었다. 이제 마커별로 처리해 지표 탭마다 색이 달라진다.)
+    with_val = [m for m in computed if m.get("value") is not None]
+    without_val = [m for m in computed if m.get("value") is None]
+    if with_val:
+        xs, ys = xy(with_val)
+        vals = [m["value"] for m in with_val]
         fig.add_scatter(
             x=xs, y=ys, mode="markers",
             marker=dict(symbol="diamond", size=16,
-                        color=vals if has_val else T.PRIMARY,
-                        colorscale="Teal" if has_val else None,
-                        showscale=has_val,
-                        colorbar=dict(title=f"{metric_label} ({unit})", thickness=12)
-                        if has_val else None,
+                        color=vals, colorscale="Teal_r", showscale=True,
+                        colorbar=dict(title=f"{metric_label}<br>({unit})", thickness=12),
                         line=dict(width=1, color="#fff")),
-            text=[m.get("label", "") for m in computed],
+            text=[m.get("label", "") for m in with_val],
+            customdata=vals,
             name="계산값 ◆",
-            hovertemplate="%{text}<extra></extra>",
+            hovertemplate="%{text}<br>" + metric_label + "=%{customdata:.3f} " + unit + "<extra></extra>",
+        )
+    if without_val:
+        xs, ys = xy(without_val)
+        fig.add_scatter(
+            x=xs, y=ys, mode="markers",
+            marker=dict(symbol="diamond-open", size=15,
+                        color=T.TEXT_MUTED, line=dict(width=1.5, color=T.TEXT_MUTED)),
+            text=[m.get("label", "") for m in without_val],
+            name="계산값(이 지표 없음) ◇",
+            hovertemplate="%{text}<br>" + metric_label + ": 데이터 없음<extra></extra>",
         )
     # 계획 조성 (빈 원)
     if planned:

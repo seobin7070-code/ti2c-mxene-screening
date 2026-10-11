@@ -90,6 +90,11 @@ def _load_comp(path, mtime):
     return load_composition_map(path)
 
 
+@st.cache_data(show_spinner=False)
+def _load_geometry(path, mtime):
+    return S.load_geometry(path)
+
+
 def get_entries():
     if "uploaded_entries" in st.session_state:
         return st.session_state["uploaded_entries"], st.session_state.get("uploaded_errors", [])
@@ -98,6 +103,7 @@ def get_entries():
 
 entries, load_errors = get_entries()
 comp_map = _load_comp(COMP_CSV, _mtime(COMP_CSV))
+geometry = _load_geometry(GEOM_CSV, _mtime(GEOM_CSV))
 settings = load_settings(CONFIG)
 
 
@@ -107,16 +113,17 @@ def fmt(x, nd=3):
 
 # ───────────────────────── GPR 모델 (타깃 4개) ─────────────────
 @st.cache_resource(show_spinner=False)
-def _fit_models(mtime_e, mtime_c, min_train):
+def _fit_models(mtime_e, mtime_c, mtime_g, min_train):
     models = {}
     for t in G.TARGETS:
-        pts = S.training_points(entries, comp_map, t)
+        pts = S.training_points(entries, comp_map, t, geometry=geometry)
         models[t] = G.fit_target(pts, t, min_train)
     return models
 
 
 def get_models():
-    return _fit_models(_mtime(ENERGIES_CSV), _mtime(COMP_CSV), settings.min_train_points)
+    return _fit_models(_mtime(ENERGIES_CSV), _mtime(COMP_CSV), _mtime(GEOM_CSV),
+                       settings.min_train_points)
 
 
 def active_model_count():
@@ -256,21 +263,38 @@ def page_forward():
     C.footer()
 
 
+def _parse_fraction(raw, unit):
+    """분율 입력 하나를 mol% 로 파싱. 빈칸/숫자 아님/음수면 None (0 은 유효하나 δ 로그비는 불가)."""
+    s = (raw or "").strip()
+    if s == "":
+        return None
+    try:
+        v = float(s)
+    except ValueError:
+        return None
+    if v < 0:
+        return None
+    return ppm_to_molpct(v) if unit == "ppm" else v
+
+
 def _forward_metrics(surface, co2_raw, h2o_raw, so2_raw, unit):
-    """계산값 기반 P·분류. 세 가스를 동일 세트 안에서만 계산(세트 혼합 금지)."""
+    """계산값 기반 P·분류. 세 가스를 동일 세트 안에서만 계산(세트 혼합 금지).
+
+    E_ads·원시 P 는 배가스 조건과 무관하므로 분율을 비워도 항상 표시된다.
+    조건 보정 δ·P_cond 만 분율에 의존하며, 특정 분율이 비면 그 δ 만 비활성 처리한다.
+    """
     cg = S.best_calc_group_for_surface(entries, surface)
     p = S.p_indices(entries, surface, calc_group=cg)
-    # 조건 보정
-    try:
-        if unit == "ppm":
-            p_co2 = ppm_to_molpct(float(co2_raw))
-            p_h2o = ppm_to_molpct(float(h2o_raw))
-            p_so2 = ppm_to_molpct(float(so2_raw))
-        else:
-            p_co2, p_h2o, p_so2 = float(co2_raw), float(h2o_raw), float(so2_raw)
-        cc = S.condition_correction(p_co2, p_h2o, p_so2)
-    except ValueError:
-        cc = None
+    # 분율을 가스별로 독립 파싱 — 한 칸이 비어도 나머지는 유효 (문제 수정)
+    p_co2 = _parse_fraction(co2_raw, unit)
+    p_h2o = _parse_fraction(h2o_raw, unit)
+    p_so2 = _parse_fraction(so2_raw, unit)
+    # δ 는 p_co2 와 해당 가스 분율이 모두 양수일 때만 계산 (조건 보정)
+    cc = None
+    if p_co2 is not None and p_co2 > 0:
+        cc = S.condition_correction(p_co2,
+                                    p_h2o if p_h2o is not None else 0.0,
+                                    p_so2 if p_so2 is not None else 0.0)
 
     C.section_title("CO₂ 선호도 (Preference Index)")
     ph = p["P(CO2/H2O)"]
@@ -290,6 +314,15 @@ def _forward_metrics(surface, co2_raw, h2o_raw, so2_raw, unit):
     else:
         html += (f'<div style="padding:6px 0"><b>P(CO₂/SO₂)</b> '
                  f'{C.status_pill("pending", "데이터 없음")} <span class="hint">{ps.reason}</span></div>')
+    # 표면 흐트러짐 Δd (SO₂ 한정, geometry 필요)
+    dd = S.delta_d_for_surface(geometry, surface)
+    if dd.ok:
+        html += (f'<div style="padding:6px 0"><b>Δd</b> '
+                 f'<span class="mono" style="color:{T.GAS["SO2"]["color"]}">{dd.value_A:.3f} Å</span> '
+                 f'<span class="hint">(SO₂ 흡착 전후 말단기 z 변화)</span></div>')
+    else:
+        html += (f'<div style="padding:6px 0"><b>Δd</b> '
+                 f'{C.status_pill("pending", "데이터 없음")} <span class="hint">{dd.reason}</span></div>')
     C.card(html)
 
     # 분류 (P(CO2/H2O) 기준)
@@ -307,6 +340,17 @@ def _forward_metrics(surface, co2_raw, h2o_raw, so2_raw, unit):
         C.card('<div class="hint">근거: ' + " · ".join(res.reasons) + "</div>")
         st.caption(f"{COND_NOTE}: δ_H₂O = {cc.delta_h2o:+.3f} eV → "
                    f"P_cond(CO₂/H₂O) = {p_cond:+.3f} eV")
+    elif ph.ok and (p_co2 is None or p_co2 <= 0 or p_h2o is None or p_h2o <= 0):
+        # P 는 계산됐으나 조건 보정에 필요한 분율(CO₂·H₂O)이 비었음 → 보정 전 분류
+        inp = ClassifyInput(mu_p_cond=ph.value_eV, sigma_p=0.0,
+                            mu_eads_co2=e_co2.E_ad_eV if e_co2.ok else None,
+                            reaction_flag="none")
+        res = classify(inp, settings.kappa, settings.margin_m_eV,
+                       settings.delta_d_max_A, settings.sigma_max_eV, settings.preset,
+                       settings.wide_range)
+        C.render_html(st, _class_badge(res.label))
+        C.card('<div class="hint">근거(보정 전 P 기준): ' + " · ".join(res.reasons) + "</div>")
+        st.caption("CO₂·H₂O 분율을 0보다 크게 입력하면 온도·분압 1차 보정(δ_H₂O)이 적용됩니다.")
     else:
         inp = ClassifyInput(mu_p_cond=None,
                             missing=S.missing_for_P(entries, surface))
@@ -482,17 +526,26 @@ def page_map():
     C.page_header("조성 지도", "삼원 조성 공간에서 계산·계획 조성과 지표를 봅니다.")
     C.scope_banner()
 
-    tab = st.radio("지표", ["Eads(CO₂)", "Eads(H₂O)", "Eads(SO₂)"], horizontal=True)
+    tab = st.radio("지표", ["Eads(CO₂)", "Eads(H₂O)", "Eads(SO₂)", "P(CO₂/H₂O)", "Δd"],
+                   horizontal=True)
     gas_of = {"Eads(CO₂)": "CO2", "Eads(H₂O)": "H2O", "Eads(SO₂)": "SO2"}
-    gas = gas_of[tab]
+    unit = "Å" if tab == "Δd" else "eV"
 
     markers = []
     # 1) 두 세트의 확정 표면 마커 (세트별로 각각 — SET1·SET2 모두 표시)
     for mk in S.confirmed_surface_markers(entries, comp_map):
-        value = mk["eads"].get(gas)
+        surf = mk["surface"]
+        if tab in gas_of:
+            value = mk["eads"].get(gas_of[tab])
+        elif tab == "P(CO₂/H₂O)":
+            p = S.p_indices(entries, surf, calc_group=mk["calc_group"])["P(CO2/H2O)"]
+            value = p.value_eV if p.ok else None
+        else:  # Δd
+            dd = S.delta_d_for_surface(geometry, surf)
+            value = dd.value_A if dd.ok else None
         markers.append({"xO": mk["xO"], "xF": mk["xF"], "xOH": mk["xOH"],
                         "kind": "computed", "value": value,
-                        "label": f'{mk["surface"]} ({mk["calc_group"]})'})
+                        "label": f'{surf} ({mk["calc_group"]})'})
     # 2) 계획 조성 (좌표는 있으나 미확정 — 빈 원). 이미 확정 좌표로 그린 점은 중복 제외.
     drawn = {(round(m["xO"], 3), round(m["xF"], 3), round(m["xOH"], 3)) for m in markers}
     for surf, c in comp_map.items():
@@ -504,9 +557,11 @@ def page_map():
         markers.append({"xO": c.xO, "xF": c.xF, "xOH": c.xOH,
                         "kind": "planned", "value": None, "label": f"{surf} (계획)"})
 
-    st.plotly_chart(charts.composition_map(markers, tab, "eV"), use_container_width=True)
-    st.caption("◆ 계산값(세트명 표기) · 빈 원 계획 조성. 같은 조성 좌표라도 세트가 다르면 "
-               "각각의 계산값을 가집니다(세트 간 뺄셈 없음).")
+    st.plotly_chart(charts.composition_map(markers, tab, unit), use_container_width=True)
+    st.caption("◆ 계산값(세트명 표기, 색=지표값) · ◇ 이 지표 데이터 없음 · 빈 원 계획 조성. "
+               "같은 조성 좌표라도 세트가 다르면 각각의 계산값을 가집니다(세트 간 뺄셈 없음).")
+    if tab == "Δd":
+        st.caption("Δd 는 SO₂ 흡착 전후 z 좌표(geometry)가 입력된 표면에서만 표시됩니다 (명세 4.3).")
 
     # 좌표 미확정 표면 안내 (좌표 자체가 없는 경우만)
     unconf = [s for s, c in comp_map.items() if c.xO is None]
@@ -657,7 +712,7 @@ def page_model():
     label_map = {"Eads_CO2": "Eads(CO₂)", "Eads_H2O": "Eads(H₂O)",
                  "Eads_SO2": "Eads(SO₂)", "Delta_d": "Δd"}
     for t in G.TARGETS:
-        pts = S.training_points(entries, comp_map, t)
+        pts = S.training_points(entries, comp_map, t, geometry=geometry)
         n = len(pts)
         state = f"{n}개 · 활성" if n >= settings.min_train_points \
             else f"{n}/{settings.min_train_points}"
@@ -668,6 +723,11 @@ def page_model():
             cc = st.columns(2)
             cc[0].markdown(C.kpi_card("MAE", f"{q.mae:.4f}", "eV"), unsafe_allow_html=True)
             cc[1].markdown(C.kpi_card("RMSE", f"{q.rmse:.4f}", "eV"), unsafe_allow_html=True)
+        elif t == "Delta_d" and not geometry:
+            C.empty_state("📐", "Δd 데이터 대기",
+                          "Δd 는 SO₂ 흡착 전후 z 좌표(geometry)가 필요합니다. "
+                          "연구팀이 SO₂ 계산 구조를 확인해 data/geometry.csv 에 입력하면 "
+                          "자동으로 계산·표시됩니다 (명세 4.3·10).")
         else:
             C.empty_state("📈", "LOOCV 데이터 부족", q.reason)
 
