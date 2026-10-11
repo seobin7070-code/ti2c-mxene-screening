@@ -281,6 +281,49 @@ def surface_motif(comp) -> str:
             f'<g class="ill-legend">{legend}</g></svg>')
 
 
+# ── 조성 커버리지 삼각도 (보고서 7개 조성 상태) ─────────────────
+def coverage_triangle(points: list[dict], size: int = 260) -> str:
+    """7개 조성 좌표를 상태별로 표시.
+
+    points: [{coord:(xO,xF,xOH)|None, state: 'done'|'planned'|'unconfirmed', label}]
+      done=채운 원, planned=빈 원, unconfirmed=점선 원.
+    coord=None(삼원 혼합 등)은 삼각형 중심 근처에 배치.
+    """
+    pad = 30
+    ax, ay = size / 2, pad                    # 위 꼭짓점 = O
+    bx, by = pad, size - pad                  # 좌하 = F
+    cx, cy = size - pad, size - pad           # 우하 = OH
+    dots = ""
+    for p in points:
+        coord = p.get("coord")
+        if coord is None:
+            px, py = size / 2, (ay + by + cy) / 3 + 6  # 중심
+        else:
+            xo, xf, xoh = coord
+            px = xo * ax + xf * bx + xoh * cx
+            py = xo * ay + xf * by + xoh * cy
+        state = p.get("state", "planned")
+        if state == "done":
+            dots += (f'<circle cx="{px:.1f}" cy="{py:.1f}" r="7" fill="var(--ill-accent)" '
+                     f'stroke="#fff" stroke-width="1.5"/>')
+        elif state == "unconfirmed":
+            dots += (f'<circle cx="{px:.1f}" cy="{py:.1f}" r="7" fill="none" '
+                     f'stroke="var(--ill-f)" stroke-width="2" stroke-dasharray="3 3"/>')
+        else:  # planned
+            dots += (f'<circle cx="{px:.1f}" cy="{py:.1f}" r="7" fill="none" '
+                     f'stroke="var(--ill-accent)" stroke-width="2"/>')
+    return (f'<svg viewBox="0 0 {size} {size}" class="coverage-tri" role="img" '
+            f'aria-label="보고서 정의 7개 조성의 커버리지 삼각도" '
+            f'xmlns="http://www.w3.org/2000/svg">'
+            f'<polygon points="{ax},{ay} {bx},{by} {cx},{cy}" fill="var(--ill-tint)" '
+            f'fill-opacity="0.4" stroke="var(--ill-faint)" stroke-width="1.5" '
+            f'stroke-linejoin="round"/>'
+            f'<text x="{ax}" y="{ay-8}" class="ill-flow-label">-O</text>'
+            f'<text x="{bx-4}" y="{by+16}" class="ill-flow-label">-F</text>'
+            f'<text x="{cx+4}" y="{cy+16}" class="ill-flow-label">-OH</text>'
+            f'{dots}</svg>')
+
+
 # ── 5. 빈 상태용 소형 일러스트 ────────────────────────────────────
 def empty_locked() -> str:
     return ('<svg viewBox="0 0 64 64" class="ill-empty" role="img" aria-label="잠긴 모델">'

@@ -588,6 +588,35 @@ def page_reverse():
     C.section_title("지표별 모델 상태")
     C.card(status_html)
 
+    # ── 조성 커버리지 삼각도 (보고서 7개 조성) ──
+    C.section_head(ILL.icon_dft(), "조성 커버리지 삼각도")
+    cov_points = []
+    for item in C.REPORT_COMPOSITIONS:
+        coord = item["coord"]
+        # 상태: 확정 표면 좌표와 일치하면 done, 미확정 표면이면 unconfirmed, 그 외 planned
+        state = "planned"
+        if coord is not None:
+            for c in comp_map.values():
+                if C._coord_matches(c, coord):
+                    state = "done" if c.confirmed else "unconfirmed"
+                    break
+        cov_points.append({"coord": coord, "state": state, "label": item["formula"]})
+    legend = (
+        '<div class="cov-legend">'
+        '<span class="ci"><svg width="14" height="14"><circle cx="7" cy="7" r="5" '
+        'fill="var(--ill-accent)"/></svg> 계산·확정</span>'
+        '<span class="ci"><svg width="14" height="14"><circle cx="7" cy="7" r="5" '
+        'fill="none" stroke="var(--ill-accent)" stroke-width="2"/></svg> 계획</span>'
+        '<span class="ci"><svg width="14" height="14"><circle cx="7" cy="7" r="5" '
+        'fill="none" stroke="var(--ill-f)" stroke-width="2" stroke-dasharray="2 2"/></svg> '
+        '조성 미확정</span></div>'
+    )
+    st.markdown(
+        f'<div class="card">{ILL.coverage_triangle(cov_points)}{legend}'
+        f'<div class="ill-caption">개념도 — 실제 계산 구조·결과가 아님</div></div>',
+        unsafe_allow_html=True,
+    )
+
     if not models:
         # 데이터 부족: 흐린 삼각도 미리보기 + 자물쇠 + 진행바 + "N개 더 필요"
         counts = metric_trainable_counts()
@@ -649,6 +678,35 @@ def page_reverse():
                 unsafe_allow_html=True,
             )
         st.caption("활성화된 지표만 Pareto 목적함수에 포함됩니다.")
+
+    # ── 사용자 우선순위 가중 정렬 (활성 지표 한정) ──
+    pr = st.session_state.get("priority", {"w_h2o": 0.5, "w_so2": 0.5, "w_dd": 0.5})
+    if front:
+        C.section_head(ILL.icon_al(), "사용자 우선순위 가중 정렬")
+        st.caption("사용자 지정 우선순위에 따른 정렬이며 물리 모델이 아닙니다. "
+                   "활성화된 지표만 반영됩니다.")
+        weight_map = {"P(CO2/H2O)": pr["w_h2o"], "P(CO2/SO2)": pr["w_so2"], "Δd": pr["w_dd"]}
+
+        def score(cand):
+            # P는 클수록(가중 +), Δd는 작을수록(가중 -) 선호
+            s = 0.0
+            for k, v in cand.items():
+                if k == "composition":
+                    continue
+                w = weight_map.get(k, 0.0)
+                s += (w * v) if k.startswith("P(") else (-w * v)
+            return s
+
+        ranked = sorted(front, key=score, reverse=True)
+        rows_html = ""
+        for i, cand in enumerate(ranked[:5]):
+            comp_str = ", ".join(f"{x:.2f}" for x in cand["composition"])
+            rows_html += (f'<div style="display:flex;gap:10px;padding:8px 0;'
+                          f'border-bottom:1px solid {T.BORDER}">'
+                          f'<b style="min-width:40px">#{i+1}</b>'
+                          f'<span class="mono" style="color:{T.PRIMARY}">[{comp_str}]</span> '
+                          f'<span class="mono hint">가중점수 {score(cand):.3f}</span></div>')
+        C.card(rows_html)
 
     C.footer()
 
@@ -973,7 +1031,41 @@ def page_competitive():
 
 
 def page_flue_gas():
-    _placeholder("설계", "배가스 조건 설정", "시나리오 메모와 사용자 우선순위를 설정합니다.")
+    C.page_header_bc("설계", "배가스 조건 설정",
+                     "시나리오 메모와 역방향 추천 정렬용 우선순위를 설정합니다.")
+
+    C.notice("info", "현재 계산(0 K, 진공 DFT)에는 반영되지 않는 시나리오 메모입니다.",
+             "입력값은 물리 모델에 들어가지 않으며, 리포트에 기록되고 추천 정렬에만 쓰입니다.")
+
+    cond = st.session_state.get("flue_gas", {})
+    C.section_head(ILL.icon_metrics(), "배가스 조성·조건 (메모)")
+    c1, c2, c3 = st.columns(3)
+    co2 = c1.number_input("CO₂ (vol%)", min_value=0.0, max_value=100.0,
+                          value=float(cond.get("co2", 0.0)), step=0.1)
+    h2o = c2.number_input("H₂O (vol%)", min_value=0.0, max_value=100.0,
+                          value=float(cond.get("h2o", 0.0)), step=0.1)
+    so2 = c3.number_input("SO₂ (vol%)", min_value=0.0, max_value=100.0,
+                          value=float(cond.get("so2", 0.0)), step=0.1)
+    temp = st.number_input("온도 (°C)", value=float(cond.get("temp", 0.0)), step=1.0)
+    memo = st.text_area("메모", value=cond.get("memo", ""),
+                        placeholder="예: 석탄화력 배가스 가정 등 (업종 프리셋 수치는 제공하지 않습니다)")
+
+    st.session_state["flue_gas"] = {
+        "co2": co2, "h2o": h2o, "so2": so2, "temp": temp, "memo": memo,
+    }
+
+    # 사용자 우선순위 슬라이더
+    C.section_head(ILL.icon_gpr(), "사용자 우선순위 (추천 정렬에만 사용)")
+    st.caption("사용자 지정 우선순위이며 물리 모델이 아닙니다. 역방향 추천 후보 정렬에만 반영됩니다.")
+    pr = st.session_state.get("priority", {})
+    pc1, pc2, pc3 = st.columns(3)
+    w_h2o = pc1.slider("H₂O 대비 선택성", 0.0, 1.0, float(pr.get("w_h2o", 0.5)), 0.05)
+    w_so2 = pc2.slider("SO₂ 대비 선택성", 0.0, 1.0, float(pr.get("w_so2", 0.5)), 0.05)
+    w_dd = pc3.slider("표면 변형 최소화", 0.0, 1.0, float(pr.get("w_dd", 0.5)), 0.05)
+    st.session_state["priority"] = {"w_h2o": w_h2o, "w_so2": w_so2, "w_dd": w_dd}
+
+    C.notice("ok", "저장되었습니다.", "이 설정은 리포트 내보내기와 역방향 추천 정렬에 사용됩니다.")
+    C.footer()
 
 
 def page_out_inspector():

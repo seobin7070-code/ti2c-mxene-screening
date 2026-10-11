@@ -209,6 +209,9 @@ footer {{ visibility: hidden; }}
 .ill-legend text, .ill-legend-t {{ font-size:11px; fill:var(--ill-stroke); }}
 .ill-flow {{ width:100%; max-width:640px; height:auto; }}
 .ill-tri {{ display:inline-block; vertical-align:middle; }}
+.coverage-tri {{ width:100%; max-width:300px; height:auto; display:block; margin:0 auto; }}
+.cov-legend {{ display:flex; gap:16px; justify-content:center; margin-top:8px; font-size:12px; color:{T.TEXT_MUTED}; flex-wrap:wrap; }}
+.cov-legend .ci {{ display:inline-flex; align-items:center; gap:5px; }}
 .ill-empty {{ width:56px; height:56px; margin:0 auto 8px; display:block; }}
 
 /* ── 부유 애니메이션 (가스 분자) ───────────────────────────── */
