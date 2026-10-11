@@ -35,6 +35,18 @@ def test_descriptor_coordinates():
         assert c.confirmed is True
 
 
+def test_ternary_on_quarter_grid():
+    """삼원 대표 조성은 2×2 셀에서 가능한 1/4-격자 점이어야 한다 (명세 3.1·10).
+
+    (1/3,1/3,1/3)은 2×2 셀에서 만들 수 없고 격자 밖이라, 대표 삼원은 (0.5,0.25,0.25).
+    """
+    from core.grid import quarter_grid
+    _, comp = _load()
+    c = comp["Ti2C_ternary"]
+    assert (c.xO, c.xF, c.xOH) == (0.5, 0.25, 0.25)
+    assert (c.xO, c.xF, c.xOH) in quarter_grid(), "삼원 좌표가 1/4-격자에 없음"
+
+
 def test_app_imports_get_grid():
     """역방향 추천 페이지가 쓰는 get_grid 가 app 네임스페이스에 로드되어야 한다.
 
