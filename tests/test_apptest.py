@@ -63,18 +63,22 @@ def test_P_shows_no_data_on_current_data():
     assert not at.exception
 
 
-def test_four_gpr_inactive():
-    # core 수준에서 네 타깃 모두 비활성(현재 데이터)
+def test_gpr_activation_with_threshold3():
+    # threshold=3 + Ti2C_FH 확정 → Eads 세 타깃은 활성, Δd(geometry 없음)는 비활성
     from core.loader import load_energies
     from core.composition import load_composition_map
     from core import screening as S
-    from core.gpr_model import TARGETS, fit_target, GprUnavailable
+    from core.gpr_model import TARGETS, fit_target, GprModel, GprUnavailable
     from core.settings import load_settings
     base = os.path.join(os.path.dirname(__file__), "..")
     entries = load_energies(os.path.join(base, "data", "energies.csv")).entries
     comp = load_composition_map(os.path.join(base, "data", "composition_map.csv"))
     st = load_settings(os.path.join(base, "config", "settings.json"))
-    for t in TARGETS:
-        m = fit_target(S.training_points(entries, comp, t), t, st.min_train_points)
-        assert isinstance(m, GprUnavailable), f"{t} 활성화됨"
-        assert "/7" in m.message
+    assert st.min_train_points == 3
+    models = {t: fit_target(S.training_points(entries, comp, t), t, st.min_train_points)
+              for t in TARGETS}
+    # Eads 세 타깃은 학습 데이터 3개 이상 → 활성
+    for t in ("Eads_CO2", "Eads_H2O", "Eads_SO2"):
+        assert isinstance(models[t], GprModel), f"{t} 비활성"
+    # Δd 는 geometry 데이터가 없어 학습점 0개 → 비활성
+    assert isinstance(models["Delta_d"], GprUnavailable)

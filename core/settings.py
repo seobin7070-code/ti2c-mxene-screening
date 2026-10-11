@@ -18,7 +18,7 @@ DEFAULTS = {
     "preset": "condition_input",
     "wide_range": {"reject_below_eV": -0.10, "prefer_above_eV": 0.25},
     "composition_grid": "quarter",
-    "min_train_points": 7,
+    "min_train_points": 3,
     "min_distance_far_threshold": 4.0,
 }
 
@@ -32,7 +32,7 @@ class Settings:
     preset: str = "condition_input"
     wide_range: dict = field(default_factory=lambda: dict(DEFAULTS["wide_range"]))
     composition_grid: str = "quarter"
-    min_train_points: int = 7
+    min_train_points: int = 3
     min_distance_far_threshold: float = 4.0
 
 
@@ -52,6 +52,6 @@ def load_settings(path: str) -> Settings:
         preset=data.get("preset", "condition_input"),
         wide_range=data.get("wide_range", dict(DEFAULTS["wide_range"])),
         composition_grid=data.get("composition_grid", "quarter"),
-        min_train_points=int(data.get("min_train_points", 7)),
+        min_train_points=int(data.get("min_train_points", 3)),
         min_distance_far_threshold=float(data.get("min_distance_far_threshold", 4.0)),
     )

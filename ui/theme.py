@@ -320,14 +320,16 @@ body.landing-active .block-container {{ padding-top:1.2rem !important; max-width
 .landing-hero {{ display:flex; gap:28px; align-items:center; margin-top:20px; }}
 .landing-hero-left {{ flex:1.1; min-width:0; }}
 .landing-hero-right {{ flex:1.3; display:flex; justify-content:center; }}
-.landing-title {{ font-size:46px; font-weight:800; line-height:1.16; letter-spacing:-0.02em; color:#fff; }}
-.landing-sub {{ font-size:16px; color:#CBD5E1; margin-top:14px; line-height:1.6; max-width:48ch; }}
+.landing-title {{ font-size:46px; font-weight:800; line-height:1.16; letter-spacing:-0.02em; color:#fff;
+    text-shadow:0 2px 8px rgba(0,0,0,0.35); }}
+.landing-sub {{ font-size:17px; color:#E8EEF5; margin-top:14px; line-height:1.7; max-width:48ch;
+    font-weight:500; text-shadow:0 1px 3px rgba(0,0,0,0.3); }}
 /* 히어로 일러스트 1.4배 (max-width 460 → 644) */
 .landing-hero-svg {{ width:100%; max-width:644px; height:auto; }}
 .landing-mol {{ font-size:13px; fill:#E2E8F0; text-anchor:middle; font-family:'JetBrains Mono',monospace; }}
 .landing-layer {{ font-size:14px; fill:#0B1F33; font-weight:800; }}
 .landing-legend text {{ font-size:13px; fill:#CBD5E1; }}
-.landing-caption {{ font-size:12px; color:#94A3B8; text-align:center; margin-top:4px; font-style:italic; }}
+.landing-caption {{ font-size:12px; color:#CBD5E1; text-align:center; margin-top:4px; font-style:italic; }}
 .landing-values {{ display:flex; gap:16px; margin-top:10px; flex-wrap:wrap; }}
 .val-item {{ flex:1; min-width:200px; display:flex; gap:10px; align-items:flex-start;
     background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12);
@@ -336,10 +338,10 @@ body.landing-active .block-container {{ padding-top:1.2rem !important; max-width
 .val-svg {{ width:22px; height:22px; }}
 .val-item .val-t {{ font-size:14px; font-weight:600; color:#F1F5F9; }}
 .landing-strip {{ margin-top:16px; padding:12px 16px; border-radius:10px;
-    background:rgba(0,0,0,0.22); border:1px solid rgba(255,255,255,0.1);
-    font-size:13px; color:#E2E8F0; }}
+    background:rgba(0,0,0,0.30); border:1px solid rgba(255,255,255,0.14);
+    font-size:13px; line-height:1.6; color:#F1F5F9; }}
 .landing-strip .mono {{ color:#5EEAD4; }}
-.landing-foot {{ margin-top:16px; font-size:12px; color:#94A3B8; }}
+.landing-foot {{ margin-top:16px; font-size:12px; color:#CBD5E1; }}
 .landing-foot .wordmark {{ font-size:13px; }}
 .landing-scope {{ margin-top:12px; padding:14px 16px; border-radius:10px;
     background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.18);

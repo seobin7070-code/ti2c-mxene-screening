@@ -35,8 +35,8 @@ def test_descriptor_coordinates():
         assert c.confirmed is True
 
 
-# ── 요구사항 2: 통합 학습 7개 이상 ──────────────────────────────
-def test_unified_training_7plus():
+# ── 요구사항 2: 통합 학습 데이터가 충분(현재 13점, 활성 threshold=3) ──
+def test_unified_training_enough():
     entries, comp = _load()
     pts = S.training_points_unified(entries, comp)
     assert len(pts) >= 7

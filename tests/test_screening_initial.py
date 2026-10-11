@@ -56,11 +56,12 @@ def test_set2_P_h2o_no_data():
     assert p.ok is False
 
 
-def test_ti2c_fh_unconfirmed():
+def test_ti2c_fh_confirmed_coords():
+    # Ti2C_FH: H→OH 환산 가정으로 F:OH 50:50 좌표 부여 (확정)
     _, comp = _load()
     c = comp["Ti2C_FH"]
-    assert c.confirmed is False
-    assert c.xO is None
+    assert c.confirmed is True
+    assert (c.xO, c.xF, c.xOH) == (0.0, 0.5, 0.5)
 
 
 def test_set1_surfaces_have_assigned_coords():
@@ -72,13 +73,14 @@ def test_set1_surfaces_have_assigned_coords():
     assert (foh.xO, foh.xF, foh.xOH) == (0.0, 0.5, 0.5) and foh.confirmed is True
 
 
-def test_unified_gpr_active_with_7plus():
-    """세트 통합(가스 차원 포함) 학습 데이터가 7개 이상이면 통합 GPR이 활성화된다."""
+def test_unified_gpr_active_with_threshold():
+    """세트 통합(가스 차원 포함) 학습 데이터가 threshold 이상이면 통합 GPR이 활성화된다."""
     from core.gpr_model import fit_unified, UnifiedModel
     entries, comp = _load()
     st = load_settings(SETTINGS)
     pts = S.training_points_unified(entries, comp)
-    assert len(pts) >= 7, f"통합 학습 데이터 {len(pts)}개 (<7)"
+    assert len(pts) >= st.min_train_points, \
+        f"통합 학습 데이터 {len(pts)}개 (<{st.min_train_points})"
     m = fit_unified(pts, st.min_train_points)
     assert isinstance(m, UnifiedModel)
     # 학습점 예측이 실제 계산값에 근접
@@ -89,7 +91,7 @@ def test_unified_gpr_active_with_7plus():
 
 def test_settings_defaults():
     st = load_settings(SETTINGS)
-    assert st.min_train_points == 7
+    assert st.min_train_points == 3
     assert st.preset == "condition_input"
     assert st.composition_grid == "quarter"
 

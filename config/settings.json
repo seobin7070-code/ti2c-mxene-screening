@@ -6,6 +6,6 @@
   "preset": "condition_input",
   "wide_range": { "reject_below_eV": -0.10, "prefer_above_eV": 0.25 },
   "composition_grid": "quarter",
-  "min_train_points": 7,
+  "min_train_points": 3,
   "min_distance_far_threshold": 4.0
 }
