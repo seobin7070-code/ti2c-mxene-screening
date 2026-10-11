@@ -307,3 +307,113 @@ def empty_chart() -> str:
             '<rect x="20" y="36" width="6" height="12" fill="var(--ill-accent)" opacity="0.5"/>'
             '<rect x="30" y="28" width="6" height="20" fill="var(--ill-accent)" opacity="0.5"/>'
             '<rect x="40" y="40" width="6" height="8" fill="var(--ill-accent)" opacity="0.5"/></svg>')
+
+
+# ── 시작 화면: 흐르는 분자 점·선 패턴 (배경) ────────────────────
+def molecule_pattern() -> str:
+    """어두운 배경 위를 천천히 흐르는 분자 점·선 패턴. CSS로 애니메이션/정지."""
+    return '''
+<svg class="landing-pattern" viewBox="0 0 1200 600" preserveAspectRatio="xMidYMid slice"
+     aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+  <g class="lp-drift" fill="none" stroke="rgba(94,234,212,0.18)" stroke-width="1">
+    <g>
+      <circle cx="120" cy="120" r="3" fill="rgba(94,234,212,0.4)"/>
+      <circle cx="260" cy="200" r="3" fill="rgba(94,234,212,0.3)"/>
+      <circle cx="420" cy="90"  r="3" fill="rgba(94,234,212,0.35)"/>
+      <circle cx="600" cy="240" r="3" fill="rgba(94,234,212,0.3)"/>
+      <circle cx="780" cy="140" r="3" fill="rgba(94,234,212,0.35)"/>
+      <circle cx="960" cy="260" r="3" fill="rgba(94,234,212,0.3)"/>
+      <circle cx="1100" cy="120" r="3" fill="rgba(94,234,212,0.35)"/>
+      <path d="M120 120 L260 200 L420 90 L600 240 L780 140 L960 260 L1100 120"/>
+      <circle cx="180" cy="420" r="3" fill="rgba(94,234,212,0.3)"/>
+      <circle cx="360" cy="500" r="3" fill="rgba(94,234,212,0.3)"/>
+      <circle cx="540" cy="400" r="3" fill="rgba(94,234,212,0.3)"/>
+      <circle cx="720" cy="520" r="3" fill="rgba(94,234,212,0.3)"/>
+      <circle cx="900" cy="430" r="3" fill="rgba(94,234,212,0.3)"/>
+      <circle cx="1080" cy="500" r="3" fill="rgba(94,234,212,0.3)"/>
+      <path d="M180 420 L360 500 L540 400 L720 520 L900 430 L1080 500"/>
+    </g>
+  </g>
+</svg>'''
+
+
+# ── 시작 화면 히어로: MXene 층 + 떠 있는 가스 분자 (밝은 틴트) ────
+def landing_hero(animate: bool = True) -> str:
+    """어두운 배경 대비를 위해 밝은 틴트를 쓰는 시작화면용 큰 도식."""
+    co2, h2o, so2 = T.GAS["CO2"]["color"], T.GAS["H2O"]["color"], T.GAS["SO2"]["color"]
+    cls = "ill-float" if animate else ""
+    return f'''
+<svg viewBox="0 0 460 320" class="landing-hero-svg" role="img"
+     aria-label="MXene 층상 구조와 위에서 떠 있는 CO2·H2O·SO2 분자 개념도"
+     xmlns="http://www.w3.org/2000/svg">
+  <g class="{cls}" style="animation-delay:0s">
+    <g transform="translate(110,70)">
+      <line x1="-20" y1="0" x2="20" y2="0" stroke="#CBD5E1" stroke-width="3"/>
+      <circle cx="-20" cy="0" r="10" fill="{co2}"/>
+      <circle cx="0" cy="0" r="11" fill="#E2E8F0"/>
+      <circle cx="20" cy="0" r="10" fill="{co2}"/>
+      <text x="0" y="30" class="landing-mol">CO₂</text>
+    </g>
+  </g>
+  <g class="{cls}" style="animation-delay:1.5s">
+    <g transform="translate(240,52)">
+      <line x1="0" y1="0" x2="-17" y2="-10" stroke="#CBD5E1" stroke-width="3"/>
+      <line x1="0" y1="0" x2="17" y2="-10" stroke="#CBD5E1" stroke-width="3"/>
+      <circle cx="0" cy="0" r="11" fill="{h2o}"/>
+      <circle cx="-17" cy="-10" r="7" fill="#F1F5F9"/>
+      <circle cx="17" cy="-10" r="7" fill="#F1F5F9"/>
+      <text x="0" y="32" class="landing-mol">H₂O</text>
+    </g>
+  </g>
+  <g class="{cls}" style="animation-delay:3s">
+    <g transform="translate(360,74)">
+      <line x1="0" y1="0" x2="-18" y2="9" stroke="#CBD5E1" stroke-width="3"/>
+      <line x1="0" y1="0" x2="18" y2="9" stroke="#CBD5E1" stroke-width="3"/>
+      <circle cx="0" cy="0" r="11" fill="{so2}"/>
+      <circle cx="-18" cy="9" r="8" fill="#5EEAD4"/>
+      <circle cx="18" cy="9" r="8" fill="#5EEAD4"/>
+      <text x="0" y="34" class="landing-mol">SO₂</text>
+    </g>
+  </g>
+  <g stroke="rgba(203,213,225,0.5)" stroke-width="1.5" stroke-dasharray="3 5" fill="none">
+    <path d="M110 104 L110 170"/><path d="M240 90 L240 170"/><path d="M360 108 L360 170"/>
+  </g>
+  <g>
+    <circle cx="90" cy="186" r="8" fill="{co2}"/>
+    <circle cx="170" cy="186" r="8" fill="{so2}"/>
+    <circle cx="240" cy="186" r="8" fill="{h2o}"/>
+    <circle cx="320" cy="186" r="8" fill="{co2}"/>
+    <circle cx="390" cy="186" r="8" fill="{so2}"/>
+  </g>
+  <g>
+    <rect x="50" y="202" width="360" height="26" rx="5" fill="#5EEAD4" opacity="0.9"/>
+    <rect x="50" y="228" width="360" height="20" rx="5" fill="#99F6E4" opacity="0.7"/>
+    <rect x="50" y="248" width="360" height="26" rx="5" fill="#5EEAD4" opacity="0.9"/>
+    <text x="420" y="219" class="landing-layer">Ti</text>
+    <text x="420" y="242" class="landing-layer">C</text>
+    <text x="420" y="265" class="landing-layer">Ti</text>
+  </g>
+  <g class="landing-legend">
+    <circle cx="60" cy="296" r="5" fill="{co2}"/><text x="70" y="300">-O / CO₂</text>
+    <circle cx="170" cy="296" r="5" fill="{so2}"/><text x="180" y="300">-F / SO₂</text>
+    <circle cx="280" cy="296" r="5" fill="{h2o}"/><text x="290" y="300">-OH / H₂O</text>
+  </g>
+</svg>'''
+
+
+# ── 시작 화면 핵심 가치 아이콘 ─────────────────────────────────
+def value_icon_water() -> str:
+    return ('<svg viewBox="0 0 24 24" class="val-svg"><path d="M12 3 C12 3 5 11 5 15 '
+            'a7 7 0 0 0 14 0 C19 11 12 3 12 3 z" fill="none" stroke="currentColor" '
+            'stroke-width="1.6"/></svg>')
+
+
+def value_icon_source() -> str:
+    return ('<svg viewBox="0 0 24 24" class="val-svg"><path d="M7 3 h7 l4 4 v14 H7 z" '
+            'fill="none" stroke="currentColor" stroke-width="1.6"/>'
+            '<path d="M14 3 v4 h4" fill="none" stroke="currentColor" stroke-width="1.6"/>'
+            '<path d="M9 13 h6 M9 16 h6" stroke="currentColor" stroke-width="1.4"/></svg>')
+
+
+def value_icon_explore() -> str:
+    return composition_triangle(size=24)

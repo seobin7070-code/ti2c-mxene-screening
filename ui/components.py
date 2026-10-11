@@ -73,6 +73,21 @@ def section_head(icon_svg: str, text: str):
     )
 
 
+def breadcrumb(category: str, page: str):
+    """'카테고리 › 페이지' 브레드크럼."""
+    st.markdown(
+        f'<div class="breadcrumb"><span class="bc-cat">{html.escape(category)}</span>'
+        f'<span class="bc-sep">›</span>{html.escape(page)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def page_header_bc(category: str, title: str, subtitle: str):
+    """브레드크럼 + 페이지 헤더."""
+    breadcrumb(category, title)
+    page_header(title, subtitle)
+
+
 # ── 용어 툴팁 (ⓘ) ──────────────────────────────────────────────
 def info_tooltip(term: str, label: Optional[str] = None) -> str:
     """용어 옆 ⓘ 아이콘 + 호버 설명 HTML. 설명은 ui.glossary에서 가져온다."""
@@ -156,10 +171,10 @@ def card(html_inner: str, tight: bool = False):
 
 
 def footer():
+    from ui import branding
     st.markdown(
-        '<div class="app-footer">'
-        '계산: Quantum ESPRESSO, PBE-D3 · 본 플랫폼의 수치는 '
-        '<span class="mono">data/energies.csv</span>에서 직접 산출됨'
+        f'<div class="app-footer">{html.escape(branding.footer_text())} · '
+        '본 플랫폼의 수치는 <span class="mono">data/energies.csv</span>에서 직접 산출됨'
         '</div>',
         unsafe_allow_html=True,
     )

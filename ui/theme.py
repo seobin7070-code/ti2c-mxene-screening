@@ -264,11 +264,83 @@ footer {{ visibility: hidden; }}
     .pipe-step {{ flex:1 1 45%; }}
 }}
 
+/* ══════════════════════ 시작 화면 (landing) ══════════════════ */
+.landing-wrap {{
+    position:fixed; inset:0; z-index:1000; overflow:auto;
+    background: linear-gradient(135deg, {T.NAVY} 0%, #0C3A3A 55%, {T.PRIMARY} 130%);
+    color:#F1F5F9;
+    animation: landingFade 300ms ease;
+}}
+@keyframes landingFade {{ from {{ opacity:0; }} to {{ opacity:1; }} }}
+.landing-pattern {{ position:absolute; inset:0; width:100%; height:100%; z-index:0; }}
+.lp-drift {{ animation: lpDrift 9s ease-in-out infinite alternate; }}
+@keyframes lpDrift {{ from {{ transform:translateX(-30px); }} to {{ transform:translateX(30px); }} }}
+.landing-inner {{ position:relative; z-index:1; max-width:1100px; margin:0 auto; padding:28px 32px 40px; }}
+.landing-top {{ display:flex; justify-content:space-between; align-items:center; gap:12px; }}
+.landing-top .lt-left {{ display:flex; align-items:center; gap:10px; }}
+.landing-top .lt-left .ill-tri {{ width:28px; height:28px; }}
+.landing-event {{ font-size:12px; color:#CBD5E1; text-align:right; }}
+.landing-hero {{ display:flex; gap:28px; align-items:center; margin-top:34px; }}
+.landing-hero-left {{ flex:1.2; min-width:0; }}
+.landing-hero-right {{ flex:1; display:flex; justify-content:center; }}
+.landing-title {{ font-size:52px; font-weight:800; line-height:1.18; letter-spacing:-0.02em; color:#fff; }}
+.landing-sub {{ font-size:16px; color:#CBD5E1; margin-top:16px; line-height:1.7; max-width:50ch; }}
+.landing-hero-svg {{ width:100%; max-width:460px; height:auto; }}
+.landing-mol {{ font-size:11px; fill:#E2E8F0; text-anchor:middle; font-family:'JetBrains Mono',monospace; }}
+.landing-layer {{ font-size:12px; fill:#0B1F33; font-weight:800; }}
+.landing-legend text {{ font-size:11px; fill:#CBD5E1; }}
+.landing-caption {{ font-size:11px; color:#94A3B8; text-align:center; margin-top:6px; font-style:italic; }}
+.landing-values {{ display:flex; gap:16px; margin-top:30px; flex-wrap:wrap; }}
+.val-item {{ flex:1; min-width:200px; display:flex; gap:10px; align-items:flex-start;
+    background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12);
+    border-radius:12px; padding:14px 16px; }}
+.val-item .val-ic {{ color:#5EEAD4; flex:0 0 auto; }}
+.val-svg {{ width:22px; height:22px; }}
+.val-item .val-t {{ font-size:14px; font-weight:600; color:#F1F5F9; }}
+.landing-strip {{ margin-top:26px; padding:12px 16px; border-radius:10px;
+    background:rgba(0,0,0,0.22); border:1px solid rgba(255,255,255,0.1);
+    font-size:13px; color:#E2E8F0; }}
+.landing-strip .mono {{ color:#5EEAD4; }}
+.landing-foot {{ margin-top:22px; font-size:12px; color:#94A3B8; }}
+.landing-foot .wordmark {{ font-size:13px; }}
+
+@media (max-width: 760px) {{
+    .landing-title {{ font-size:32px; }}
+    .landing-hero {{ flex-direction:column; align-items:flex-start; }}
+    .landing-hero-right {{ order:2; width:100%; }}
+}}
+
+/* ── 브레드크럼 ───────────────────────────────────────────── */
+.breadcrumb {{ font-size:12px; color:{T.TEXT_MUTED}; margin-bottom:2px; }}
+.breadcrumb .bc-sep {{ opacity:0.5; margin:0 4px; }}
+.breadcrumb .bc-cat {{ color:{T.PRIMARY}; font-weight:600; }}
+
+/* ── 사이드바 카테고리 그룹 헤더 ──────────────────────────── */
+.nav-group {{ font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+    color:{T.TEXT_MUTED}; margin:12px 0 2px 2px; }}
+
+/* ── 기능 둘러보기 카드 (Overview) ────────────────────────── */
+.cat-card {{ background:{T.CARD}; border:1px solid {T.BORDER}; border-radius:12px;
+    padding:16px; min-height:132px; display:flex; flex-direction:column;
+    transition: box-shadow 150ms ease, transform 150ms ease; }}
+.cat-card:hover {{ box-shadow:0 6px 18px rgba(11,31,51,0.10); transform:translateY(-2px); }}
+.cat-card .cc-ic {{ width:30px; height:30px; border-radius:8px; background:{T.TINT};
+    display:flex; align-items:center; justify-content:center; color:{T.PRIMARY}; margin-bottom:8px; }}
+.cat-card .cc-ic svg {{ width:18px; height:18px; }}
+.cat-card .cc-title {{ font-size:14px; font-weight:700; color:{T.TEXT}; }}
+.cat-card .cc-desc {{ font-size:12px; color:{T.TEXT_MUTED}; margin-top:4px; line-height:1.5; flex:1; }}
+
+/* ── 발표 모드 ────────────────────────────────────────────── */
+.present-mode .block-container {{ font-size:1.15em; }}
+.present-mode .hint, .present-mode .ill-caption {{ font-size:0.95em; }}
+
 /* ── 모션 최소화 ──────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {{
     .ill-float {{ animation: none !important; }}
-    .card, .scn-card, .kpi-eq {{ transition: none !important; }}
-    .card:hover, .scn-card:hover, .kpi-eq:hover {{ transform:none; }}
+    .lp-drift {{ animation: none !important; }}
+    .landing-wrap {{ animation: none !important; }}
+    .card, .scn-card, .kpi-eq, .cat-card {{ transition: none !important; }}
+    .card:hover, .scn-card:hover, .kpi-eq:hover, .cat-card:hover {{ transform:none; }}
 }}
 
 /* ── 다크 모드 ────────────────────────────────────────────── */

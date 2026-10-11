@@ -28,6 +28,9 @@ from ui import charts
 from ui import tokens as T
 from ui import illustrations as ILL
 from ui import glossary
+from ui import branding as B
+from ui import landing
+from ui import nav as NAV
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(HERE, "data")
@@ -39,12 +42,27 @@ GASES = ["CO2", "H2O", "SO2"]
 P_METRICS = ["P(CO2/H2O)", "P(CO2/SO2)"]
 
 st.set_page_config(
-    page_title="Ti2C MXene AI-DFT 스크리닝",
+    page_title=B.PROJECT_TITLE,
     page_icon="⬡",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 theme.inject()
+
+# 발표 모드 CSS 클래스 (body에 present-mode 부여)
+if st.session_state.get("present_mode"):
+    st.markdown(
+        "<style>.stApp {} </style>"
+        "<script>document.body.classList.add('present-mode');</script>"
+        '<div class="present-mode-flag"></div>',
+        unsafe_allow_html=True,
+    )
+    # Streamlit은 iframe 구조라 body 클래스 대신 블록 컨테이너에 직접 적용
+    st.markdown(
+        "<style>section.main .block-container { font-size:1.15em; }"
+        ".present-only-hide { display:none !important; }</style>",
+        unsafe_allow_html=True,
+    )
 
 
 # ───────────────────────── 데이터 로딩 ─────────────────────────
@@ -101,6 +119,22 @@ METRIC_LABEL = {
 }
 
 
+def active_model_count() -> int:
+    """유효 표면 수가 MIN_TRAINING 이상인 지표 모델 수 (0~3)."""
+    counts = metric_trainable_counts()
+    return sum(1 for m in registry.ALL_METRICS if counts[m] >= gpr.MIN_TRAINING)
+
+
+# ───────────────────────── 시작 화면 분기 ─────────────────────────
+if not st.session_state.get("entered"):
+    landing.render(
+        n_ead=len(computed_ead_rows()),
+        n_models_active=active_model_count(),
+        n_models_total=len(registry.ALL_METRICS),
+    )
+    st.stop()
+
+
 def confirmed_composition_points() -> list[tuple[float, float, float]]:
     """조성 확정 표면들의 [xO,xF,xOH] 좌표 (삼각도 모티프에 점으로 표시)."""
     pts = []
@@ -110,29 +144,58 @@ def confirmed_composition_points() -> list[tuple[float, float, float]]:
     return pts
 
 
-# ───────────────────────── 사이드바 ─────────────────────────
+# ───────────────────────── 사이드바 (카테고리 내비) ─────────────────────────
 with st.sidebar:
-    tri = ILL.composition_triangle(size=24, points=confirmed_composition_points())
+    tri = ILL.composition_triangle(size=22, points=confirmed_composition_points())
     st.markdown(
         f'<div class="sidebar-logo-row">{tri}'
-        f'<span class="sidebar-logo">Ti₂C MXene 스크리닝</span></div>'
-        '<div class="sidebar-sub">AI-DFT 흡착 스크리닝 플랫폼</div>',
+        f'<span class="sidebar-logo">{B.wordmark(on_dark=False, size=16)}</span></div>'
+        '<div class="sidebar-sub">Ti₂C MXene 표면 설계 플랫폼</div>',
         unsafe_allow_html=True,
     )
-    _nav_options = ["Overview", "정방향 검증", "역방향 추천", "모델 품질", "데이터 레지스트리"]
-    _nav_default = st.session_state.pop("_nav", None)
-    _nav_index = _nav_options.index(_nav_default) if _nav_default in _nav_options else 0
-    page = st.radio(
-        "내비게이션",
-        _nav_options,
-        index=_nav_index,
-        label_visibility="collapsed",
-    )
+    # 로고(홈) 클릭 → 시작 화면 복귀
+    if st.button("← 시작 화면으로", use_container_width=True):
+        st.session_state["entered"] = False
+        st.rerun()
 
-    # 데이터 상태 요약 — 지표 모델별로 '계산된 표면 N/7'을 각각 표시
+    # 프로그램적 네비게이션 요청(_nav) 처리 → current_page 설정
+    _nav_req = st.session_state.pop("_nav", None)
+    if _nav_req in NAV.all_pages():
+        st.session_state["current_page"] = _nav_req
+        # 해당 카테고리 라디오 위젯 상태도 맞춰 둠
+        st.session_state[f"navradio_{NAV.category_of(_nav_req)}"] = _nav_req
+
+    if "current_page" not in st.session_state:
+        st.session_state["current_page"] = "Overview"
+
+    def _on_pick(cat: str):
+        st.session_state["current_page"] = st.session_state[f"navradio_{cat}"]
+
+    # 카테고리별 그룹 헤더 + 라디오
+    for cat, pages in NAV.CATEGORIES.items():
+        st.markdown(
+            f'<div class="nav-group">{NAV.CAT_ICONS[cat]} &nbsp;{cat} '
+            f'<span style="font-weight:400;text-transform:none;letter-spacing:0">'
+            f'· {NAV.CAT_DESC[cat]}</span></div>',
+            unsafe_allow_html=True,
+        )
+        wkey = f"navradio_{cat}"
+        cur = st.session_state["current_page"]
+        idx = pages.index(cur) if cur in pages else None
+        st.radio(
+            cat, pages,
+            index=idx,  # 현재 페이지가 이 카테고리에 없으면 선택 없음(None)
+            label_visibility="collapsed", key=wkey,
+            on_change=_on_pick, args=(cat,),
+        )
+
+    page = st.session_state["current_page"]
+
+    st.markdown('<hr style="border:none;border-top:1px solid var(--ill-faint);margin:12px 0 4px">',
+                unsafe_allow_html=True)
+
+    # 데이터 상태 진행바 3줄 (0/7)
     counts = metric_trainable_counts()
-    n_surfaces = len(registry.surfaces(entries))
-    n_computed = len(computed_ead_rows())
     per_metric_html = "".join(
         f'<div style="margin-top:8px"><div class="hint">{METRIC_LABEL[m]} 모델</div>'
         f'{C.progress_bar(counts[m], gpr.MIN_TRAINING)}</div>'
@@ -141,20 +204,24 @@ with st.sidebar:
     st.markdown(
         f'<div class="data-summary">'
         f'<div class="kpi-label">데이터 상태</div>'
-        f'<div style="margin:6px 0"><span class="mono">{n_surfaces}</span> 표면 · '
-        f'<span class="mono">{n_computed}</span> E_ad 계산됨</div>'
+        f'<div style="margin:6px 0"><span class="mono">{len(registry.surfaces(entries))}</span> 표면 · '
+        f'<span class="mono">{len(computed_ead_rows())}</span> E_ad 계산됨</div>'
         f'<div class="kpi-label" style="margin-top:10px">모델 학습 데이터 '
-        f'<span class="hint">(지표가 계산된 표면 수 / 필요 {gpr.MIN_TRAINING})</span></div>'
-        f'{per_metric_html}'
-        f'</div>',
+        f'<span class="hint">(계산된 표면 / {gpr.MIN_TRAINING})</span></div>'
+        f'{per_metric_html}</div>',
         unsafe_allow_html=True,
+    )
+
+    # 발표 모드 토글
+    st.session_state["present_mode"] = st.toggle(
+        "발표 모드", value=st.session_state.get("present_mode", False),
+        help="글자 확대·보조 설명 숨김. 데이터는 변경되지 않습니다.",
     )
 
     # 문서 영역
     st.markdown(
         '<div class="sidebar-docs">'
         '<div class="kpi-label">문서</div>'
-        '<a href="#방법론-한눈에">· 방법론 보기 (Overview 하단)</a>'
         '<a href="https://github.com/seobin7070-code/ti2c-mxene-screening" '
         'target="_blank" rel="noopener">· README (GitHub)</a>'
         '</div>',
@@ -193,6 +260,8 @@ def _pipeline_steps(rows, counts):
 def page_overview():
     rows = computed_ead_rows()
     counts = metric_trainable_counts()
+
+    C.breadcrumb("홈", "Overview")
 
     # ── 히어로 (네이비→틸 그라데이션 + 우측 SVG) ──
     st.markdown(
@@ -337,13 +406,32 @@ def page_overview():
         )
         st.caption("서로 다른 calc_group의 값은 섞어서 계산하지 않습니다.")
 
+    # ── 기능 둘러보기 (6개 카테고리 카드) ──
+    C.section_head(NAV.CAT_ICONS["자료"], "기능 둘러보기")
+    cats = list(NAV.CATEGORIES.keys())
+    row1 = st.columns(3)
+    row2 = st.columns(3)
+    cols = row1 + row2
+    for col, cat in zip(cols, cats):
+        first_page = NAV.CATEGORIES[cat][0]
+        n_pages = len(NAV.CATEGORIES[cat])
+        col.markdown(
+            f'<div class="cat-card"><div class="cc-ic">{NAV.CAT_ICONS[cat]}</div>'
+            f'<div class="cc-title">{cat}</div>'
+            f'<div class="cc-desc">{NAV.CAT_DESC[cat]} · {n_pages}개 페이지</div></div>',
+            unsafe_allow_html=True,
+        )
+        if col.button(f"{cat} 열기", key=f"catbtn_{cat}", use_container_width=True):
+            st.session_state["_nav"] = first_page
+            st.rerun()
+
     C.footer()
 
 
 # ═══════════════════════ 정방향 검증 ═══════════════════════
 def page_forward():
-    C.page_header("정방향 검증",
-                  "표면과 가스를 선택하면 계산 가능한 흡착 에너지와 선택성 지표를 보여줍니다.")
+    C.page_header_bc("분석", "정방향 검증",
+                     "표면과 가스를 선택하면 계산 가능한 흡착 에너지와 선택성 지표를 보여줍니다.")
 
     surf_list = registry.surfaces(entries)
     if not surf_list:
@@ -468,6 +556,7 @@ def page_forward():
 
 # ═══════════════════════ 역방향 추천 ═══════════════════════
 def page_reverse():
+    C.breadcrumb("설계", "역방향 추천")
     # 헤더에 삼각도 모티프 (현재 확정 조성 좌표를 점으로)
     tri = ILL.composition_triangle(size=30, points=confirmed_composition_points())
     st.markdown(
@@ -566,6 +655,7 @@ def page_reverse():
 
 # ═══════════════════════ 모델 품질 ═══════════════════════
 def page_quality():
+    C.breadcrumb("모델", "모델 품질")
     st.markdown(
         '<div class="page-title">모델 품질</div>'
         f'<div class="page-sub">{C.info_tooltip("LOOCV", "LOOCV")}로 실제 계산된 성능 수치만 '
@@ -597,8 +687,8 @@ def page_quality():
 
 # ═══════════════════════ 데이터 레지스트리 ═══════════════════════
 def page_registry_view():
-    C.page_header("데이터 레지스트리",
-                  "모든 에너지 항목·출처·calc_group·상태를 확인하고, CSV로 새 데이터를 반영합니다.")
+    C.page_header_bc("데이터", "데이터 레지스트리",
+                     "모든 에너지 항목·출처·calc_group·상태를 확인하고, CSV로 새 데이터를 반영합니다.")
 
     # 데이터 신뢰 원칙 3줄 카드
     st.markdown(
@@ -724,12 +814,78 @@ def page_registry_view():
     C.footer()
 
 
+# ═══════════════════════ Phase 2에서 구현될 신규 페이지 (현재는 준비 중) ═══════
+def _placeholder(category: str, title: str, desc: str):
+    C.page_header_bc(category, title, desc)
+    C.empty_state_svg(
+        ILL.empty_waiting(), "준비 중입니다.",
+        "이 페이지는 다음 단계(Phase 2)에서 제공됩니다. "
+        "데이터가 없는 기능은 대기/잠금으로 표시됩니다.",
+    )
+    C.footer()
+
+
+def page_surface_compare():
+    _placeholder("분석", "표면 비교", "표면 2~4개와 가스를 골라 흡착 에너지를 나란히 비교합니다.")
+
+
+def page_competitive():
+    _placeholder("분석", "경쟁 흡착 비교", "표면별 CO₂/H₂O/SO₂ 흡착과 선택성을 함께 비교합니다.")
+
+
+def page_flue_gas():
+    _placeholder("설계", "배가스 조건 설정", "시나리오 메모와 사용자 우선순위를 설정합니다.")
+
+
+def page_out_inspector():
+    _placeholder("데이터", ".out 파일 검사기", "Quantum ESPRESSO 출력 파일을 파싱·검증합니다.")
+
+
+def page_jobs():
+    _placeholder("데이터", "계산 작업 관리", "계산 작업 목록과 진행 현황을 관리합니다.")
+
+
+def page_integrity():
+    _placeholder("데이터", "무결성 점검", "데이터 자동 검사와 스냅샷 해시를 제공합니다.")
+
+
+def page_roadmap():
+    _placeholder("모델", "잠금 해제 로드맵", "지표 모델 활성화에 필요한 다음 계산을 안내합니다.")
+
+
+def page_methods():
+    _placeholder("자료", "방법론", "수식·계산 조건·설계·한계를 설명합니다.")
+
+
+def page_glossary():
+    _placeholder("자료", "용어집", "플랫폼에서 쓰는 용어를 검색합니다.")
+
+
+def page_report():
+    _placeholder("자료", "리포트 내보내기", "HTML/Markdown 리포트와 CSV 번들을 생성합니다.")
+
+
+def page_about():
+    _placeholder("자료", "팀·프로젝트 소개", "RE:ACT와 프로젝트 목표를 소개합니다.")
+
+
 # ───────────────────────── 라우팅 ─────────────────────────
 PAGES = {
     "Overview": page_overview,
     "정방향 검증": page_forward,
+    "표면 비교": page_surface_compare,
+    "경쟁 흡착 비교": page_competitive,
+    "배가스 조건 설정": page_flue_gas,
     "역방향 추천": page_reverse,
-    "모델 품질": page_quality,
     "데이터 레지스트리": page_registry_view,
+    ".out 파일 검사기": page_out_inspector,
+    "계산 작업 관리": page_jobs,
+    "무결성 점검": page_integrity,
+    "모델 품질": page_quality,
+    "잠금 해제 로드맵": page_roadmap,
+    "방법론": page_methods,
+    "용어집": page_glossary,
+    "리포트 내보내기": page_report,
+    "팀·프로젝트 소개": page_about,
 }
-PAGES[page]()
+PAGES.get(page, page_overview)()
