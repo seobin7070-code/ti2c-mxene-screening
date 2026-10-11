@@ -95,6 +95,53 @@ def ead_bar_png(rows: list[dict]) -> go.Figure:
     return fig
 
 
+def surface_compare_bar(rows: list[dict], gas: str, png: bool = False) -> go.Figure:
+    """표면 비교 막대차트. rows: [{surface, e_ad_ev}] (단일 가스). 가스 고정색."""
+    m = T.gas_meta(gas)
+    fig = go.Figure()
+    fig.add_bar(
+        x=[r["surface"] for r in rows],
+        y=[r["e_ad_ev"] for r in rows],
+        marker_color=m["color"], name=m["label"],
+        text=[f'{r["e_ad_ev"]:.3f}' for r in rows], textposition="outside",
+    )
+    fig = _base_layout(fig, height=360)
+    fig.update_yaxes(title_text="E_ad (eV)")
+    fig.update_xaxes(title_text="표면")
+    if png:
+        fig.update_layout(paper_bgcolor="#FFFFFF", plot_bgcolor="#FFFFFF",
+                          font=dict(color="#334155"),
+                          title=dict(text=f"표면 비교 — {m['label']} 흡착", x=0.02),
+                          margin=dict(l=50, r=30, t=50, b=50))
+    return fig
+
+
+def competitive_bar(by_surface: dict, png: bool = False) -> go.Figure:
+    """경쟁 흡착 그룹 막대. by_surface: {surface: {gas: e_ad_ev}}. 가스별 trace."""
+    surfaces = list(by_surface.keys())
+    fig = go.Figure()
+    for gas in ["CO2", "H2O", "SO2"]:
+        m = T.gas_meta(gas)
+        ys = [by_surface[s].get(gas) for s in surfaces]
+        if all(v is None for v in ys):
+            continue
+        fig.add_bar(
+            x=surfaces, y=ys, name=m["label"], marker_color=m["color"],
+            text=[f'{v:.3f}' if v is not None else "" for v in ys],
+            textposition="outside",
+        )
+    fig = _base_layout(fig, height=380)
+    fig.update_yaxes(title_text="E_ad (eV)")
+    fig.update_xaxes(title_text="표면")
+    fig.update_layout(barmode="group")
+    if png:
+        fig.update_layout(paper_bgcolor="#FFFFFF", plot_bgcolor="#FFFFFF",
+                          font=dict(color="#334155"),
+                          title=dict(text="경쟁 흡착 비교 (가스별 E_ad)", x=0.02),
+                          margin=dict(l=50, r=30, t=50, b=50))
+    return fig
+
+
 def parity_plot(y_true, y_pred, metric: str) -> go.Figure:
     """예측-실측 산점도 (LOOCV)."""
     lo = min(min(y_true), min(y_pred))

@@ -826,11 +826,150 @@ def _placeholder(category: str, title: str, desc: str):
 
 
 def page_surface_compare():
-    _placeholder("분석", "표면 비교", "표면 2~4개와 가스를 골라 흡착 에너지를 나란히 비교합니다.")
+    C.page_header_bc("분석", "표면 비교",
+                     "표면 2~4개와 가스를 골라 흡착 에너지를 나란히 비교합니다.")
+    surf_list = registry.surfaces(entries)
+    if not surf_list:
+        C.empty_state_svg(ILL.empty_chart(), "표면 데이터가 없습니다.",
+                          "데이터 레지스트리에서 추가하세요.")
+        C.footer()
+        return
+
+    c1, c2 = st.columns([2, 1])
+    picked = c1.multiselect("표면 선택 (2~4개)", surf_list,
+                            default=surf_list[:min(4, len(surf_list))], max_selections=4)
+    gas = c2.selectbox("가스", GASES, format_func=lambda g: T.gas_meta(g)["label"])
+
+    if len(picked) < 2:
+        C.notice("info", "표면을 2개 이상 선택하세요.")
+        C.footer()
+        return
+
+    # 각 표면 E_ad 계산 (불가 시 사유)
+    results = []
+    for s in picked:
+        r = registry.compute_ad_for(entries, s, gas)
+        results.append({"surface": s, "r": r})
+
+    ok_rows = [{"surface": x["surface"], "e_ad_ev": x["r"].E_ad_eV}
+               for x in results if x["r"].ok]
+
+    # 막대 (계산된 것만)
+    C.section_head(ILL.icon_metrics(), f"흡착 에너지 — {T.gas_meta(gas)['label']}")
+    if ok_rows:
+        st.plotly_chart(charts.surface_compare_bar(ok_rows, gas), use_container_width=True)
+    else:
+        C.notice("pending", "선택한 표면 중 계산 가능한 E_ad가 없습니다.")
+
+    # 표 (빈칸 + 사유 pill)
+    rows_html = ""
+    for x in results:
+        s, r = x["surface"], x["r"]
+        if r.ok:
+            label, kind = C.adsorption_interpretation(r.E_ad_eV)
+            cell = (f'<span class="mono" style="color:{T.PRIMARY}">{r.E_ad_eV:.3f} eV</span> '
+                    f'<span class="mono hint">({r.E_ad_Ry:.5f} Ry)</span> '
+                    f'{C.status_pill(kind, label)}')
+        else:
+            cell = f'{C.status_pill("pending", "계산 불가")} <span class="hint">{r.reason}</span>'
+        rows_html += (f'<div style="display:flex;gap:10px;padding:8px 0;'
+                      f'border-bottom:1px solid {T.BORDER}"><b style="min-width:120px">{s}</b>'
+                      f'<span>{cell}</span></div>')
+    C.card(rows_html)
+
+    # CSV / PNG 다운로드
+    df = pd.DataFrame([{
+        "surface": x["surface"], "gas": gas,
+        "E_ad_eV": (round(x["r"].E_ad_eV, 4) if x["r"].ok else ""),
+        "E_ad_Ry": (round(x["r"].E_ad_Ry, 8) if x["r"].ok else ""),
+        "status": ("ok" if x["r"].ok else "pending"),
+        "reason": ("" if x["r"].ok else x["r"].reason),
+        "calc_group": (x["r"].calc_group if x["r"].ok else ""),
+    } for x in results])
+    dc1, dc2 = st.columns(2)
+    dc1.download_button("비교 표 CSV 다운로드", data=df_to_csv_bytes(df),
+                        file_name="surface_compare.csv", mime="text/csv")
+    if ok_rows:
+        try:
+            png = fig_to_png_bytes(charts.surface_compare_bar(ok_rows, gas, png=True))
+            dc2.download_button("비교 차트 PNG 다운로드", data=png,
+                                file_name="surface_compare.png", mime="image/png")
+        except Exception:
+            dc2.caption("PNG 내보내기를 사용할 수 없습니다.")
+    C.footer()
 
 
 def page_competitive():
-    _placeholder("분석", "경쟁 흡착 비교", "표면별 CO₂/H₂O/SO₂ 흡착과 선택성을 함께 비교합니다.")
+    C.page_header_bc("분석", "경쟁 흡착 비교",
+                     "표면별 CO₂/H₂O/SO₂ 흡착과 선택성을 함께 비교합니다.")
+    surf_list = registry.surfaces(entries)
+    if not surf_list:
+        C.empty_state_svg(ILL.empty_chart(), "표면 데이터가 없습니다.",
+                          "데이터 레지스트리에서 추가하세요.")
+        C.footer()
+        return
+
+    # 표면별 가스별 E_ad
+    by_surface = {}
+    for s in surf_list:
+        by_surface[s] = {}
+        for g in GASES:
+            r = registry.compute_ad_for(entries, s, g)
+            if r.ok:
+                by_surface[s][g] = r.E_ad_eV
+
+    C.section_head(ILL.icon_metrics(), "가스별 흡착 에너지")
+    if any(by_surface[s] for s in surf_list):
+        st.plotly_chart(charts.competitive_bar(by_surface), use_container_width=True)
+        try:
+            png = fig_to_png_bytes(charts.competitive_bar(by_surface, png=True))
+            st.download_button("경쟁 흡착 PNG 다운로드", data=png,
+                               file_name="competitive.png", mime="image/png")
+        except Exception:
+            st.caption("PNG 내보내기를 사용할 수 없습니다.")
+    else:
+        C.notice("pending", "계산 가능한 E_ad가 아직 없습니다.")
+
+    # 선택성 지표 (세 가스 모두 있을 때만)
+    C.section_head(ILL.icon_gpr(), "선택성 지표")
+    sel_html = ""
+    for s in surf_list:
+        e_co2 = registry.compute_ad_for(entries, s, "CO2")
+        e_h2o = registry.compute_ad_for(entries, s, "H2O")
+        e_so2 = registry.compute_ad_for(entries, s, "SO2")
+        p_h2o = selectivity_P("P(CO2/H2O)", e_h2o, e_co2, "H2O")
+        p_so2 = selectivity_P("P(CO2/SO2)", e_so2, e_co2, "SO2")
+
+        def cell(p):
+            if p.ok:
+                return f'<span class="mono" style="color:{T.PRIMARY}">{p.value_eV:.3f} eV</span>'
+            return f'{C.status_pill("pending", "pending")} <span class="hint">{p.reason}</span>'
+        sel_html += (f'<div style="padding:8px 0;border-bottom:1px solid {T.BORDER}">'
+                     f'<b>{s}</b><br>'
+                     f'<span class="hint">P(CO₂/H₂O):</span> {cell(p_h2o)} &nbsp; '
+                     f'<span class="hint">P(CO₂/SO₂):</span> {cell(p_so2)}</div>')
+    C.card(sel_html)
+
+    # 계산 커버리지 매트릭스 (표면 × 가스)
+    C.section_head(ILL.icon_dft(), "계산 커버리지 매트릭스")
+    header = ('<tr><th style="text-align:left;padding:6px 10px">표면</th>'
+              + "".join(f'<th style="padding:6px 10px">{T.gas_meta(g)["label"]}</th>'
+                        for g in GASES) + "</tr>")
+    body = ""
+    for s in surf_list:
+        cells = f'<td style="padding:6px 10px"><b>{s}</b></td>'
+        for g in GASES:
+            r = registry.compute_ad_for(entries, s, g)
+            pill = (C.status_pill("ok", "계산됨") if r.ok
+                    else C.status_pill("pending", "대기"))
+            cells += f'<td style="padding:6px 10px;text-align:center">{pill}</td>'
+        body += f"<tr>{cells}</tr>"
+    st.markdown(
+        f'<div class="card"><table style="width:100%;border-collapse:collapse;font-size:13px">'
+        f'{header}{body}</table></div>',
+        unsafe_allow_html=True,
+    )
+    C.footer()
 
 
 def page_flue_gas():
