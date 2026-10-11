@@ -7,3 +7,5 @@ Ti2C_OH,0,0,1,false,순수 OH 말단(계획),planned
 Ti2C_O_OH,0.5,0,0.5,false,O:OH 50:50(계획),planned
 Ti2C_F_OH,0,0.5,0.5,false,F:OH 50:50(계획),planned
 Ti2C_ternary,0.5,0.25,0.25,false,삼원 대표(계획),planned
+Ti2C_OF_alt,,,,false,세트1 대형셀 O:F 대안 배열(좌표 미확정),computed
+Ti2C_FOH_clu,,,,false,세트1 대형셀 F:OH 클러스터 배열(좌표 미확정),computed

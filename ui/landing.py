@@ -37,8 +37,13 @@ def should_skip_via_query() -> bool:
     return str(val) in ("1", "true", "True")
 
 
-def render(n_ead: int, n_models_active: int, n_models_total: int) -> None:
-    """시작 화면을 렌더한다."""
+def render(n_ead: int, n_models_active: int, n_models_total: int,
+           trend_rows: list | None = None) -> None:
+    """시작 화면을 렌더한다.
+
+    trend_rows: [{calc_group, surface, gas, E_ads_eV}] (계산된 복합체). 반응성 경향 요약용.
+    모든 수치는 core 결과를 그대로 받는다 (하드코딩 금지).
+    """
     if should_skip_via_query():
         _enter()
         return
@@ -109,12 +114,16 @@ def render(n_ead: int, n_models_active: int, n_models_total: int) -> None:
             unsafe_allow_html=True,
         )
 
-    # ── 가치 카드 + 상태 스트립 + 푸터 ──
+    # ── 반응성 경향 요약 (전달받은 계산값에서만 산출) ──
+    trend_html = _trend_block(trend_rows or [])
+
+    # ── 가치 카드 + 경향 + 상태 스트립 + 푸터 ──
     st.markdown(
         html_block(f'''
 <div class="landing-wrap landing-wrap-cont">
   <div class="landing-inner landing-inner-cont">
     <div class="landing-values">{values}</div>
+    {trend_html}
     <div class="landing-strip">등록된 흡착 에너지
       <span class="mono">{n_ead}</span>건 · GPR 활성 모델
       <span class="mono">{n_models_active}/{n_models_total}</span></div>
@@ -124,3 +133,33 @@ def render(n_ead: int, n_models_active: int, n_models_total: int) -> None:
 '''),
         unsafe_allow_html=True,
     )
+
+
+def _trend_block(rows: list) -> str:
+    """반응성 경향: 세트별 가스 평균 |E_ads| 와 가장 강한 흡착 조합 (계산값만)."""
+    rows = [r for r in rows if r.get("E_ads_eV") is not None]
+    if not rows:
+        return '<div class="landing-strip">반응성 경향: 계산된 흡착 에너지가 없습니다.</div>'
+    # 세트별 가스 평균 세기(음수일수록 강함 → 평균 표시)
+    sets = {}
+    for r in rows:
+        sets.setdefault(r["calc_group"], {}).setdefault(r["gas"], []).append(r["E_ads_eV"])
+    lines = ""
+    gas_label = {"CO2": "CO₂", "H2O": "H₂O", "SO2": "SO₂"}
+    for cg in sorted(sets):
+        parts = []
+        for g in ["CO2", "H2O", "SO2"]:
+            vals = sets[cg].get(g)
+            if vals:
+                avg = sum(vals) / len(vals)
+                parts.append(f'{gas_label[g]} <span class="mono">{avg:+.3f}</span>')
+        lines += (f'<div style="margin-top:4px"><b>{cg}</b> 평균 E_ads · '
+                  + " · ".join(parts) + " eV</div>")
+    # 가장 강하게 붙는 조합 (가장 음수)
+    strongest = min(rows, key=lambda r: r["E_ads_eV"])
+    lines += (f'<div style="margin-top:6px">가장 강한 흡착: '
+              f'<b>{gas_label.get(strongest["gas"], strongest["gas"])} @ {strongest["surface"]}</b> '
+              f'(<span class="mono">{strongest["E_ads_eV"]:+.3f}</span> eV · {strongest["calc_group"]})</div>')
+    return (f'<div class="landing-strip"><b>반응성 경향</b> '
+            f'<span style="opacity:.8">(더 음수일수록 강한 흡착 · 세트 간 뺄셈은 섞지 않음)</span>'
+            f'{lines}</div>')

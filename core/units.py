@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
-# 유일한 변환 상수 (요구사항 2.1)
-RY_TO_EV: float = 13.6057
+# 유일한 변환 상수 (1 Ry = 13.605698 eV)
+RY_TO_EV: float = 13.605698
 
 
 def ry_to_ev(x_ry: float) -> float:

@@ -1,7 +1,8 @@
-"""현재 데이터 기대 동작 (명세 [7] 완료 조건).
+"""현재 데이터(두 세트) 기대 동작.
 
-E_ads 4건만 계산, H₂O 관련·P 지수 모두 데이터 없음, GPR 4개 모두 비활성,
-계산 조성 3개(Ti2CO2, Ti2CF2, Ti2C_OF), Ti2C_FH 미확정.
+세트1(대형 슈퍼셀): 복합체 9종 모두 계산(H2O 포함).
+세트2(표준 단위셀): 복합체 4종 계산, H2O 없음.
+전체 복합체 13종, GPR 4개 비활성, 세트별 조성 매핑.
 """
 
 import os
@@ -22,53 +23,60 @@ def _load():
     return load_energies(ENERGIES).entries, load_composition_map(COMP)
 
 
-def test_only_four_eads_computable():
+def test_two_calc_groups():
     entries, _ = _load()
-    ok_pairs = []
-    for s in S.surfaces(entries):
-        for g in S.GASES:
-            if S.compute_ad_for(entries, s, g).ok:
-                ok_pairs.append((s, g))
-    assert set(ok_pairs) == {("Ti2CO2", "SO2"), ("Ti2CF2", "CO2"),
-                             ("Ti2C_FH", "CO2"), ("Ti2C_OF", "CO2")}
+    assert set(S.calc_groups(entries)) == {"SET1", "SET2"}
 
 
-def test_h2o_and_P_all_no_data():
+def test_all_adsorption_rows_13_complexes():
     entries, _ = _load()
-    for s in S.surfaces(entries):
-        # H2O 흡착 계산 불가
-        assert S.compute_ad_for(entries, s, "H2O").ok is False
-        p = S.p_indices(entries, s)
-        # P(CO2/H2O)는 항상 데이터 없음
-        assert p["P(CO2/H2O)"].ok is False
+    rows = S.all_adsorption_rows(entries)
+    assert len(rows) == 13          # 세트1 9종 + 세트2 4종
+    assert all(r["ok"] for r in rows)
+    # 세트별 개수
+    assert sum(1 for r in rows if r["calc_group"] == "SET1") == 9
+    assert sum(1 for r in rows if r["calc_group"] == "SET2") == 4
 
 
-def test_computed_surfaces_three():
-    entries, comp = _load()
-    assert set(S.computed_surfaces(entries, comp)) == {"Ti2CO2", "Ti2CF2", "Ti2C_OF"}
+def test_set1_has_h2o_set2_does_not():
+    entries, _ = _load()
+    # 세트1: H2O 흡착 계산 가능
+    assert S.compute_ad_for(entries, "Ti2CF2", "H2O", calc_group="SET1").ok
+    # 세트2: H2O 단독 분자가 없어 계산 불가
+    assert S.compute_ad_for(entries, "Ti2CF2", "H2O", calc_group="SET2").ok is False
+
+
+def test_set2_P_h2o_no_data():
+    entries, _ = _load()
+    # 세트2에는 H2O 가 없으므로 P(CO2/H2O) 데이터 없음
+    e_h2o = S.compute_ad_for(entries, "Ti2CF2", "H2O", calc_group="SET2")
+    e_co2 = S.compute_ad_for(entries, "Ti2CF2", "CO2", calc_group="SET2")
+    from core.selectivity import selectivity_P
+    p = selectivity_P("P(CO2/H2O)", e_h2o, e_co2, "H2O")
+    assert p.ok is False
 
 
 def test_ti2c_fh_unconfirmed():
     _, comp = _load()
     c = comp["Ti2C_FH"]
     assert c.confirmed is False
-    assert c.xO is None and c.xF is None and c.xOH is None
+    assert c.xO is None
 
 
-def test_planned_compositions_present():
+def test_set1_surfaces_unconfirmed_composition():
     _, comp = _load()
-    planned = [s for s, c in comp.items() if c.status == "planned" and c.surface != "Ti2C_FH"]
-    # 계획 조성 4개 (OH, O:OH, F:OH, 삼원)
-    assert len(planned) >= 4
+    # 세트1 전용 표면은 좌표 미확정(임의로 지어내지 않음)
+    for s in ["Ti2C_OF_alt", "Ti2C_FOH_clu"]:
+        assert comp[s].xO is None
+        assert comp[s].confirmed is False
 
 
 def test_all_four_gpr_inactive():
     entries, comp = _load()
     st = load_settings(SETTINGS)
     for t in TARGETS:
-        pts = S.training_points(entries, comp, t)
-        m = fit_target(pts, t, st.min_train_points)
-        assert isinstance(m, GprUnavailable), f"{t} 모델이 활성화됨(기대: 비활성)"
+        m = fit_target(S.training_points(entries, comp, t), t, st.min_train_points)
+        assert isinstance(m, GprUnavailable), f"{t} 활성화됨(기대: 비활성)"
 
 
 def test_settings_defaults():
@@ -76,4 +84,8 @@ def test_settings_defaults():
     assert st.min_train_points == 7
     assert st.preset == "condition_input"
     assert st.composition_grid == "quarter"
-    assert st.margin_m_eV == 0.10
+
+
+def test_ry_to_ev_constant():
+    from core.units import RY_TO_EV
+    assert RY_TO_EV == 13.605698

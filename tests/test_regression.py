@@ -9,15 +9,15 @@ from core.screening import compute_ad_for
 HERE = os.path.dirname(__file__)
 ENERGIES = os.path.join(HERE, "..", "data", "energies.csv")
 
-# 기존 10개 에너지 값 (Ry) — 불변
+# 표준 단위셀(SET2) 10개 에너지 값 (Ry) — 물리값 불변 (key 는 세트 체계)
 LOCKED_RY = {
-    "A/mol/CO2": -94.82308357, "A/mol/SO2": -105.27217923,
-    "A/clean/Ti2CF2": -1389.76036918, "A/clean/Ti2CO2": -1333.32037072,
-    "A/clean/Ti2C_FH": -1360.84920315, "A/clean/Ti2C_OF": -1361.40729499,
-    "A/ad/SO2@Ti2CO2": -1438.65823190, "A/ad/CO2@Ti2CF2": -1484.62192566,
-    "A/ad/CO2@Ti2C_FH": -1455.70176796, "A/ad/CO2@Ti2C_OF": -1456.27650839,
+    "SET2/mol/CO2": -94.82308357, "SET2/mol/SO2": -105.27217923,
+    "SET2/clean/Ti2CF2": -1389.76036918, "SET2/clean/Ti2CO2": -1333.32037072,
+    "SET2/clean/Ti2C_FH": -1360.84920315, "SET2/clean/Ti2C_OF": -1361.40729499,
+    "SET2/ad/SO2@Ti2CO2": -1438.65823190, "SET2/ad/CO2@Ti2CF2": -1484.62192566,
+    "SET2/ad/CO2@Ti2C_FH": -1455.70176796, "SET2/ad/CO2@Ti2C_OF": -1456.27650839,
 }
-# E_ads 4건 (eV, 셋째 자리)
+# E_ads 4건 (eV, 셋째 자리) — 세트2 안에서 계산
 LOCKED_EADS = {
     ("Ti2CO2", "SO2"): -0.894, ("Ti2CF2", "CO2"): -0.523,
     ("Ti2C_FH", "CO2"): -0.401, ("Ti2C_OF", "CO2"): -0.628,
@@ -45,10 +45,37 @@ def test_locked_energy_values_unchanged():
 def test_locked_eads_four_cases():
     entries = load_energies(ENERGIES).entries
     for (s, g), exp in LOCKED_EADS.items():
-        r = compute_ad_for(entries, s, g)
+        r = compute_ad_for(entries, s, g, calc_group="SET2")
         assert r.ok, f"{g}@{s} 계산 실패: {r.reason}"
         assert math.isclose(r.E_ad_eV, exp, abs_tol=1e-3), \
             f"{g}@{s}: {r.E_ad_eV:.4f} != {exp}"
+
+
+# 세트1 복합체 9종 E_ads (eV, 셋째 자리) — SET1 안에서 계산
+LOCKED_SET1_EADS = {
+    ("Ti2CF2", "CO2"): -0.015, ("Ti2CF2", "H2O"): -0.029, ("Ti2CF2", "SO2"): -0.045,
+    ("Ti2C_OF_alt", "CO2"): -0.018, ("Ti2C_OF_alt", "H2O"): -0.038, ("Ti2C_OF_alt", "SO2"): -0.063,
+    ("Ti2C_FOH_clu", "CO2"): -0.022, ("Ti2C_FOH_clu", "H2O"): -0.049, ("Ti2C_FOH_clu", "SO2"): -0.078,
+}
+
+
+def test_set1_nine_complexes():
+    entries = load_energies(ENERGIES).entries
+    for (s, g), exp in LOCKED_SET1_EADS.items():
+        r = compute_ad_for(entries, s, g, calc_group="SET1")
+        assert r.ok, f"SET1 {g}@{s} 계산 실패: {r.reason}"
+        assert math.isclose(r.E_ad_eV, exp, abs_tol=2e-3), \
+            f"SET1 {g}@{s}: {r.E_ad_eV:.4f} != {exp}"
+
+
+def test_sets_not_mixed():
+    """세트1 복합체는 세트2 표면·분자와 섞이지 않는다 (calc_group 지정 시 세트 내에서만)."""
+    entries = load_energies(ENERGIES).entries
+    # Ti2CF2+CO2 는 양쪽 세트에 존재 — 세트별 값이 서로 달라야 함(섞이지 않음 증거)
+    r1 = compute_ad_for(entries, "Ti2CF2", "CO2", calc_group="SET1")
+    r2 = compute_ad_for(entries, "Ti2CF2", "CO2", calc_group="SET2")
+    assert r1.ok and r2.ok
+    assert abs(r1.E_ad_eV - r2.E_ad_eV) > 0.1  # 세트1 ≈ -0.015, 세트2 ≈ -0.523
 
 
 def test_calc_group_mismatch_refuses():

@@ -128,10 +128,10 @@ if not st.session_state.get("entered") and landing.should_skip_via_query():
     st.session_state["entered"] = True
 
 if not st.session_state.get("entered"):
-    n_ead = sum(1 for s in S.surfaces(entries) for g in GASES
-                if S.compute_ad_for(entries, s, g).ok)
+    _ad_rows = S.all_adsorption_rows(entries)
+    n_ead = sum(1 for r in _ad_rows if r["ok"])
     landing.render(n_ead=n_ead, n_models_active=active_model_count(),
-                   n_models_total=len(G.TARGETS))
+                   n_models_total=len(G.TARGETS), trend_rows=_ad_rows)
     st.stop()
 
 
@@ -455,8 +455,35 @@ def page_data_qc():
         st.dataframe(pd.DataFrame([{"행": e.row_index, "사유": e.reason} for e in load_errors]),
                      use_container_width=True, hide_index=True)
 
-    # calc_group별 그룹 헤더
-    C.section_title("에너지 데이터")
+    # 복합체 흡착 에너지 비교 (세트별, 가스 고정색)
+    C.section_title("복합체 흡착 에너지 비교")
+    st.caption("세트(calc_group)별로 겹쳐 비교합니다. 서로 다른 세트의 에너지는 섞어서 빼지 않습니다.")
+    ad_rows = S.all_adsorption_rows(entries)
+    ok_rows = [r for r in ad_rows if r["ok"]]
+    if ok_rows:
+        st.plotly_chart(charts.adsorption_overview_bar(ad_rows), use_container_width=True)
+        try:
+            from core.export import fig_to_png_bytes
+            png = fig_to_png_bytes(charts.adsorption_overview_bar(ad_rows, png=True))
+            st.download_button("복합체 차트 PNG 다운로드", data=png,
+                               file_name="adsorption_overview.png", mime="image/png")
+        except Exception:
+            pass
+        # 복합체 인터랙티브 테이블
+        adf = pd.DataFrame([{
+            "calc_group": r["calc_group"], "surface": r["surface"], "gas": r["gas"],
+            "E_ads_eV": round(r["E_ads_eV"], 4), "E_ads_Ry": round(r["E_ads_Ry"], 6),
+            "source_file": r["source_file"],
+        } for r in ok_rows])
+        st.dataframe(adf, use_container_width=True, hide_index=True)
+        st.download_button("복합체 E_ads CSV 다운로드",
+                           data=adf.to_csv(index=False).encode("utf-8-sig"),
+                           file_name="adsorption_eads.csv", mime="text/csv")
+    else:
+        C.empty_state("📊", "계산된 복합체 흡착 에너지가 없습니다.")
+
+    # calc_group별 그룹 헤더 (전체 에너지 데이터)
+    C.section_title("에너지 데이터 (전체)")
     for cg in sorted({e.calc_group for e in entries}):
         grp = [e for e in entries if e.calc_group == cg]
         st.markdown(f'<div class="hint" style="margin:10px 0 4px"><b>calc_group {cg}</b> '

@@ -138,6 +138,39 @@ def composition_map(markers: list[dict], metric_label: str, unit: str = "eV") ->
     return fig
 
 
+def adsorption_overview_bar(rows: list[dict], png: bool = False) -> go.Figure:
+    """세트별 복합체 E_ads 비교 바 차트 (가스 고정색, x축=표면, facet=세트는 색/패턴 대신 그룹).
+
+    rows: all_adsorption_rows() 결과. 세트는 x축 라벨에 포함하고, 가스별로 trace 분리.
+    서로 다른 calc_group을 '겹쳐 비교'하되 뺄셈은 섞지 않았음을 캡션에서 안내한다.
+    """
+    ok = [r for r in rows if r["ok"]]
+    fig = go.Figure()
+    for gas in ["CO2", "H2O", "SO2"]:
+        g = [r for r in ok if r["gas"] == gas]
+        if not g:
+            continue
+        m = T.gas_meta(gas)
+        fig.add_bar(
+            x=[f'{r["surface"]}<br>({r["calc_group"]})' for r in g],
+            y=[r["E_ads_eV"] for r in g],
+            name=m["label"], marker_color=m["color"],
+            text=[f'{r["E_ads_eV"]:.3f}' for r in g], textposition="outside",
+            customdata=[r["source_file"] for r in g],
+            hovertemplate="%{x}<br>E_ads=%{y:.4f} eV<br>출처=%{customdata}<extra></extra>",
+        )
+    fig = _base_layout(fig, height=420)
+    fig.update_yaxes(title_text="E_ads (eV)")
+    fig.update_xaxes(title_text="표면 (calc_group)")
+    fig.update_layout(barmode="group")
+    if png:
+        fig.update_layout(paper_bgcolor="#FFFFFF", plot_bgcolor="#FFFFFF",
+                          font=dict(color="#334155"),
+                          title=dict(text="복합체 흡착 에너지 (E_ads)", x=0.02),
+                          margin=dict(l=50, r=30, t=50, b=70))
+    return fig
+
+
 def parity_plot(y_true, y_pred, metric: str) -> go.Figure:
     """예측-실측 산점도 (LOOCV)."""
     lo = min(min(y_true), min(y_pred))

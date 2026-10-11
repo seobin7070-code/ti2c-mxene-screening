@@ -20,48 +20,94 @@ from core.coords import distance_uv
 GASES = ["CO2", "H2O", "SO2"]
 
 
-# ── 엔트리 조회 ─────────────────────────────────────────────────
-def find_molecule(entries: list[EnergyEntry], gas: str) -> Optional[EnergyEntry]:
+# ── 엔트리 조회 (calc_group 지정 가능) ──────────────────────────
+# calc_group 을 지정하면 그 세트 안에서만 찾는다. 서로 다른 calc_group 을
+# 섞어서 빼지 않기 위함이다 (데이터 무결성 철칙).
+def find_molecule(entries, gas, calc_group=None):
     for e in entries:
-        if e.role == "molecule" and e.gas == gas:
+        if e.role == "molecule" and e.gas == gas and \
+           (calc_group is None or e.calc_group == calc_group):
             return e
     return None
 
 
-def find_clean(entries: list[EnergyEntry], surface: str) -> Optional[EnergyEntry]:
+def find_clean(entries, surface, calc_group=None):
     for e in entries:
-        if e.role == "clean" and e.surface == surface:
+        if e.role == "clean" and e.surface == surface and \
+           (calc_group is None or e.calc_group == calc_group):
             return e
     return None
 
 
-def find_adsorbed(entries: list[EnergyEntry], surface: str, gas: str) -> Optional[EnergyEntry]:
+def find_adsorbed(entries, surface, gas, calc_group=None):
     for e in entries:
-        if e.role == "adsorbed" and e.surface == surface and e.gas == gas:
+        if e.role == "adsorbed" and e.surface == surface and e.gas == gas and \
+           (calc_group is None or e.calc_group == calc_group):
             return e
     return None
 
 
-def surfaces(entries: list[EnergyEntry]) -> list[str]:
+def surfaces(entries, calc_group=None) -> list[str]:
     seen: list[str] = []
     for e in entries:
+        if calc_group is not None and e.calc_group != calc_group:
+            continue
         if e.surface and e.surface not in seen:
             seen.append(e.surface)
     return seen
 
 
-def compute_ad_for(entries: list[EnergyEntry], surface: str, gas: str) -> AdResult:
-    """(표면, 가스) 조합의 E_ad를 계산한다 (PDF 4.1)."""
+def calc_groups(entries) -> list[str]:
+    seen: list[str] = []
+    for e in entries:
+        if e.calc_group and e.calc_group not in seen:
+            seen.append(e.calc_group)
+    return seen
+
+
+def compute_ad_for(entries, surface, gas, calc_group=None) -> AdResult:
+    """(표면, 가스) 조합의 E_ad를 계산한다 (PDF 4.1).
+
+    calc_group 을 지정하면 그 세트의 복합체·표면·분자만 쓴다. 지정하지 않으면
+    복합체가 속한 세트를 자동으로 따라가(복합체 기준 calc_group) 같은 세트끼리 계산한다.
+    """
+    ad = find_adsorbed(entries, surface, gas, calc_group)
+    # 복합체가 속한 세트를 기준으로 표면·분자도 같은 세트에서 찾는다
+    cg = calc_group if calc_group is not None else (ad.calc_group if ad else None)
     return compute_E_ad(
-        adsorbed=find_adsorbed(entries, surface, gas),
-        clean=find_clean(entries, surface),
-        molecule=find_molecule(entries, gas),
+        adsorbed=ad,
+        clean=find_clean(entries, surface, cg),
+        molecule=find_molecule(entries, gas, cg),
     )
 
 
 def reaction_flag_for(entries: list[EnergyEntry], surface: str, gas: str) -> str:
     e = find_adsorbed(entries, surface, gas)
     return e.reaction_flag if e else "none"
+
+
+def all_adsorption_rows(entries) -> list[dict]:
+    """등록된 모든 복합체(adsorbed)의 E_ads 를 세트별로 계산해 반환한다.
+
+    각 복합체는 자신이 속한 calc_group 안에서만 계산된다(세트 혼합 금지).
+    반환: [{calc_group, surface, gas, E_ads_eV, E_ads_Ry, source_file, ok, reason}]
+    """
+    rows = []
+    for e in entries:
+        if e.role != "adsorbed":
+            continue
+        r = compute_ad_for(entries, e.surface, e.gas, calc_group=e.calc_group)
+        rows.append({
+            "calc_group": e.calc_group,
+            "surface": e.surface,
+            "gas": e.gas,
+            "E_ads_eV": r.E_ad_eV if r.ok else None,
+            "E_ads_Ry": r.E_ad_Ry if r.ok else None,
+            "source_file": e.source_file,
+            "ok": r.ok,
+            "reason": r.reason,
+        })
+    return rows
 
 
 def eads_for_surface(entries: list[EnergyEntry], surface: str) -> dict[str, AdResult]:
